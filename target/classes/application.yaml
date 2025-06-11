@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: zippy-backend
+  datasource:
+    url: jdbc:mysql://localhost:3306/zippy?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: 12345678
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format-sql: true
+    open-in-view: false
+  mail:
+    host: smtp.phamanh.io.vn
+    port: 587
+    username: zippy@phamanh.io.vn
+    password: TiinJzRyX4Aqr0
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+application:
+  security:
+    jwt:
+      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      access-token:
+        expiration: 3600000
+      refresh-token:
+        expiration: 604800000
