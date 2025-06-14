@@ -30,7 +30,7 @@ public class OtpService {
 
     // OTP configuration
     private static final int OTP_LENGTH = 6;
-    private static final int OTP_EXPIRY_MINUTES = 5;
+    private static final int OTP_EXPIRY_MINUTES = 2;
 
     /**
      * Generate a new OTP for the given email

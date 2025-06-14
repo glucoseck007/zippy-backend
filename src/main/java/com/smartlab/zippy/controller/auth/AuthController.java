@@ -8,6 +8,7 @@ import com.smartlab.zippy.model.dto.request.auth.VerifyRequest;
 import com.smartlab.zippy.model.dto.response.ApiResponse;
 import com.smartlab.zippy.model.dto.response.auth.LoginResponse;
 import com.smartlab.zippy.model.dto.response.auth.RegisterResponse;
+import com.smartlab.zippy.model.dto.response.auth.VerifyResponse;
 import com.smartlab.zippy.model.entity.User;
 import com.smartlab.zippy.repository.UserRepository;
 import com.smartlab.zippy.service.auth.OtpService;
@@ -73,6 +74,22 @@ public class AuthController {
         logger.info("Login attempt for user: {}", loginRequest.getUsername());
 
         try {
+            // First, find the user to check status before authentication
+            Optional<User> userOptional = userRepository.findByUsername(loginRequest.getUsername());
+
+            if (userOptional.isEmpty()) {
+                userOptional = userRepository.findByEmail(loginRequest.getUsername());
+            }
+
+            User user = userOptional.get();
+
+            // Check if user status is PENDING
+            if ("PENDING".equals(user.getStatus())) {
+                logger.info("User {} has PENDING status, needs verification", loginRequest.getUsername());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error("Email verification required"));
+            }
+
             // Authenticate the user
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
@@ -88,20 +105,12 @@ public class AuthController {
             String accessToken = jwtService.generateAccessToken(userDetails);
             String refreshToken = jwtService.generateRefreshToken(userDetails);
 
-            // Optional: Update user's last login time if required
-        /*
-        Optional<User> userByUsername = userRepository.findByUsername(userDetails.getUsername());
-        User user = userByUsername.orElseThrow(() -> new UsernameNotFoundException(
-            "User not found with username: " + userDetails.getUsername()));
-        user.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(user);
-        */
-
             // Build and return successful response
             ApiResponse<LoginResponse> response = ApiResponse.success(
                     LoginResponse.builder()
                             .accessToken(accessToken)
                             .refreshToken(refreshToken)
+                            .verificationRequired(false)
                             .build(),
                     "User logged in successfully"
             );
@@ -155,8 +164,16 @@ public class AuthController {
         // Check if email already exists
         Optional<User> existingUser = userRepository.findByEmail(registerRequest.getEmail());
         if (existingUser.isPresent()) {
-            return ResponseEntity.badRequest().body(
-                    ApiResponse.error("Email already registered"));
+            String status = existingUser.get().getStatus();
+            if ("ACTIVE".equals(status)) {
+                logger.warn("Email already registered: {}", registerRequest.getEmail());
+                return ResponseEntity.badRequest().body(
+                        ApiResponse.error("Email already registered"));
+            } else if ("PENDING".equals(status)) {
+                logger.warn("Email verification pending for: {}", registerRequest.getEmail());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                        ApiResponse.error("Email verification pending"));
+            }
         }
 
         // Create the user
@@ -183,25 +200,43 @@ public class AuthController {
      * @return Verification status
      */
     @PostMapping("/verify-otp")
-    public ResponseEntity<ApiResponse<Object>> verifyOtp(
+    public ResponseEntity<ApiResponse<VerifyResponse>> verifyOtp(
             @Valid @RequestBody VerifyRequest verifyRequest) {
 
-        logger.info("OTP verification attempt for email: {}", verifyRequest.getEmail());
+        String email;
+        Optional<User> userOptional = userRepository.findByEmail(verifyRequest.getCredential());
+        if (userOptional.isPresent()) {
+            email = userOptional.get().getEmail();
+        } else {
+            userOptional = userRepository.findByUsername(verifyRequest.getCredential());
+            if (userOptional.isPresent()) {
+                email = userOptional.get().getEmail();
+            } else {
+                return ResponseEntity.badRequest().body(ApiResponse.error("User not found"));
+            }
+        }
 
-        boolean isValid = otpService.validateOtp(verifyRequest.getEmail(), verifyRequest.getOtp());
+        logger.info("OTP verification attempt for email: {}", email);
+
+        boolean isValid = otpService.validateOtp(email, verifyRequest.getOtp());
 
         if (isValid) {
-            User user = userRepository.findByEmail(verifyRequest.getEmail())
-                    .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+            User user = userOptional.get();
 
             // Activate user account
             user.setStatus("ACTIVE");
             userRepository.save(user);
 
-            logger.info("OTP verification successful for email: {}", verifyRequest.getEmail());
-            return ResponseEntity.ok(ApiResponse.success("OTP verification successful"));
+            logger.info("OTP verification successful for user: {}", verifyRequest.getCredential());
+//            return ResponseEntity.ok(ApiResponse.success("OTP verification successful"));
+            return ResponseEntity.ok(
+                    ApiResponse.success(
+                            VerifyResponse.builder().build(), "OTP verification successful"
+                    )
+            );
         } else {
-            logger.warn("OTP verification failed for email: {}", verifyRequest.getEmail());
+            logger.warn("OTP verification failed for user: {}", verifyRequest.getCredential());
             return ResponseEntity.badRequest().body(ApiResponse.error("Invalid or expired OTP"));
         }
     }
@@ -209,22 +244,26 @@ public class AuthController {
     /**
      * Resend OTP endpoint
      *
-     * @param email User email
+     * @param credential User email
      * @return Status of OTP resend operation
      */
     @GetMapping("/resend-otp")
-    public ResponseEntity<ApiResponse<Object>> resendOtp(@RequestParam String email) {
-        logger.info("OTP resend request for email: {}", email);
-
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-
-        // Generate new OTP and send
-        String otp = otpService.generateOtp(email);
+    public ResponseEntity<ApiResponse<Object>> resendOtp(@RequestParam String credential) {
+        String email, otp;
+        Optional<User> userOptional = userRepository.findByEmail(credential);
+        if (userOptional.isPresent()) {
+            email = credential;
+        } else {
+            userOptional = userRepository.findByUsername(credential);
+            if (userOptional.isPresent()) {
+                email = userOptional.get().getEmail();
+            } else {
+                return ResponseEntity.badRequest().body(ApiResponse.error("User not found"));
+            }
+        }
+        otp = otpService.generateOtp(email);
         otpService.sendOtp(email, otp);
-
-        logger.info("OTP resent successfully for email: {}", email);
-        return ResponseEntity.ok(ApiResponse.success("OTP sent successfully"));
+        logger.info("OTP resent to email: {}", email);
+        return ResponseEntity.ok(ApiResponse.success("OTP resent successfully {}", email));
     }
 }
-

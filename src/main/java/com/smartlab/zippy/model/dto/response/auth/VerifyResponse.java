@@ -6,18 +6,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Response object returned after successful authentication.
- * Contains authentication tokens and user information.
- */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class LoginResponse {
+public class VerifyResponse {
 
-    private String accessToken;
-    private String refreshToken;
-    private Boolean verificationRequired;
+    private boolean success;
 }
