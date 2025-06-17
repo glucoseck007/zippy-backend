@@ -1,8 +1,8 @@
 package com.smartlab.zippy.controller.auth;
 
-import com.smartlab.zippy.config.JwtService;
-import com.smartlab.zippy.exception.GlobalHandlingException.ResourceNotFoundException;
+import com.smartlab.zippy.service.auth.JwtService;
 import com.smartlab.zippy.model.dto.request.auth.LoginRequest;
+import com.smartlab.zippy.model.dto.request.auth.RefreshTokenRequest;
 import com.smartlab.zippy.model.dto.request.auth.RegisterRequest;
 import com.smartlab.zippy.model.dto.request.auth.VerifyRequest;
 import com.smartlab.zippy.model.dto.response.ApiResponse;
@@ -12,7 +12,9 @@ import com.smartlab.zippy.model.dto.response.auth.VerifyResponse;
 import com.smartlab.zippy.model.entity.User;
 import com.smartlab.zippy.repository.UserRepository;
 import com.smartlab.zippy.service.auth.OtpService;
+import com.smartlab.zippy.service.auth.TokenService;
 import com.smartlab.zippy.service.auth.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,13 +26,12 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +48,8 @@ public class AuthController {
     private final OtpService otpService;
     private final PasswordEncoder passwordEncoder;
     private final UserRepository userRepository;
+    private final TokenService tokenService;
+    private final UserDetailsService userDetailsService;
 
     @Autowired
     public AuthController(AuthenticationManager authenticationManager,
@@ -54,13 +57,17 @@ public class AuthController {
                           UserService userService,
                           OtpService otpService,
                           PasswordEncoder passwordEncoder,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          TokenService tokenService,
+                          UserDetailsService userDetailsService) {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
         this.userService = userService;
         this.otpService = otpService;
         this.passwordEncoder = passwordEncoder;
         this.userRepository = userRepository;
+        this.tokenService = tokenService;
+        this.userDetailsService = userDetailsService;
     }
 
     /**
@@ -79,6 +86,12 @@ public class AuthController {
 
             if (userOptional.isEmpty()) {
                 userOptional = userRepository.findByEmail(loginRequest.getUsername());
+            }
+
+            // Check if user is present before calling get()
+            if (userOptional.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResponse.error("Invalid username or password"));
             }
 
             User user = userOptional.get();
@@ -265,5 +278,76 @@ public class AuthController {
         otpService.sendOtp(email, otp);
         logger.info("OTP resent to email: {}", email);
         return ResponseEntity.ok(ApiResponse.success("OTP resent successfully {}", email));
+    }
+
+    /**
+     * User logout endpoint
+     *
+     * @param request HTTP request containing the authorization header
+     * @return Success or error response
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("No authorization token provided"));
+        }
+
+        String jwt = authHeader.substring(7);
+        String username = jwtService.extractUsername(jwt);
+
+        if (username != null) {
+            // Blacklist the access token
+            tokenService.blacklistAccessToken(jwt);
+
+            logger.info("User {} successfully logged out", username);
+            return ResponseEntity.ok(ApiResponse.success(null, "Successfully logged out"));
+        }
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("Invalid token"));
+    }
+
+    /**
+     * Refresh access token using refresh token
+     *
+     * @param refreshTokenRequest The refresh token request
+     * @return New access token and refresh token
+     */
+    @PostMapping("/refresh-token")
+    public ResponseEntity<ApiResponse<LoginResponse>> refreshToken(@RequestBody RefreshTokenRequest refreshTokenRequest) {
+        String refreshToken = refreshTokenRequest.getRefreshToken();
+
+        // Validate refresh token
+        String username = tokenService.validateRefreshToken(refreshToken);
+
+        if (username == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(ApiResponse.error("Invalid refresh token"));
+        }
+
+        // Load user details and generate new tokens
+        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+
+        // Revoke old refresh token
+        tokenService.revokeRefreshToken(refreshToken);
+
+        // Generate new tokens
+        String newAccessToken = jwtService.generateAccessToken(userDetails);
+        String newRefreshToken = jwtService.generateRefreshToken(userDetails);
+
+        ApiResponse<LoginResponse> response = ApiResponse.success(
+                LoginResponse.builder()
+                        .accessToken(newAccessToken)
+                        .refreshToken(newRefreshToken)
+                        .verificationRequired(false)
+                        .build(),
+                "Tokens refreshed successfully"
+        );
+
+        logger.info("Tokens refreshed for user: {}", username);
+        return ResponseEntity.ok(response);
     }
 }

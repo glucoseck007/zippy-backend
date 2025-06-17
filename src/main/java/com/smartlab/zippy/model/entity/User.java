@@ -2,6 +2,8 @@ package com.smartlab.zippy.model.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.springframework.data.redis.core.RedisHash;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -10,8 +12,8 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@ToString(exclude = {"refreshTokens", "trips", "payments", "role"})
-@EqualsAndHashCode(exclude = {"refreshTokens", "trips", "payments", "role"})
+@ToString(exclude = {"trips", "payments", "role"})
+@EqualsAndHashCode(exclude = {"trips", "payments", "role"})
 @Entity
 @Table(name = "user")
 public class User {
@@ -50,9 +52,6 @@ public class User {
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id", insertable = false, updatable = false)
     private Role role;
-    
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private java.util.List<RefreshToken> refreshTokens;
     
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
     private java.util.List<Trip> trips;
