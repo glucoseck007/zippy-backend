@@ -13,5 +13,5 @@ import java.util.UUID;
 public interface ProductRepository extends CrudRepository<Product, UUID> {
     Optional<Product> findByCode(String code);
     List<Product> findByTripId(UUID tripId);
-    List<Product> findByContainerId(Long containerId);
+    List<Product> findByContainerCode(String containerCode);
 }

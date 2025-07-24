@@ -1,14 +1,14 @@
 package com.smartlab.zippy.controller.auth;
 
 import com.smartlab.zippy.service.auth.JwtService;
-import com.smartlab.zippy.model.dto.request.auth.LoginRequest;
-import com.smartlab.zippy.model.dto.request.auth.RefreshTokenRequest;
-import com.smartlab.zippy.model.dto.request.auth.RegisterRequest;
-import com.smartlab.zippy.model.dto.request.auth.VerifyRequest;
-import com.smartlab.zippy.model.dto.response.ApiResponse;
-import com.smartlab.zippy.model.dto.response.auth.LoginResponse;
-import com.smartlab.zippy.model.dto.response.auth.RegisterResponse;
-import com.smartlab.zippy.model.dto.response.auth.VerifyResponse;
+import com.smartlab.zippy.model.dto.web.request.auth.LoginRequest;
+import com.smartlab.zippy.model.dto.web.request.auth.RefreshTokenRequest;
+import com.smartlab.zippy.model.dto.web.request.auth.RegisterRequest;
+import com.smartlab.zippy.model.dto.web.request.auth.VerifyRequest;
+import com.smartlab.zippy.model.dto.web.response.ApiResponse;
+import com.smartlab.zippy.model.dto.web.response.auth.LoginResponse;
+import com.smartlab.zippy.model.dto.web.response.auth.RegisterResponse;
+import com.smartlab.zippy.model.dto.web.response.auth.VerifyResponse;
 import com.smartlab.zippy.model.entity.User;
 import com.smartlab.zippy.repository.UserRepository;
 import com.smartlab.zippy.service.auth.OtpService;
@@ -78,14 +78,14 @@ public class AuthController {
      */
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest loginRequest) {
-        logger.info("Login attempt for user: {}", loginRequest.getUsername());
+        logger.info("Login attempt for user: {}", loginRequest.getCredential());
 
         try {
             // First, find the user to check status before authentication
-            Optional<User> userOptional = userRepository.findByUsername(loginRequest.getUsername());
+            Optional<User> userOptional = userRepository.findByUsername(loginRequest.getCredential());
 
             if (userOptional.isEmpty()) {
-                userOptional = userRepository.findByEmail(loginRequest.getUsername());
+                userOptional = userRepository.findByEmail(loginRequest.getCredential());
             }
 
             // Check if user is present before calling get()
@@ -98,7 +98,7 @@ public class AuthController {
 
             // Check if user status is PENDING
             if ("PENDING".equals(user.getStatus())) {
-                logger.info("User {} has PENDING status, needs verification", loginRequest.getUsername());
+                logger.info("User {} has PENDING status, needs verification", loginRequest.getCredential());
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(ApiResponse.error("Email verification required"));
             }
@@ -106,7 +106,7 @@ public class AuthController {
             // Authenticate the user
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
-                            loginRequest.getUsername(),
+                            loginRequest.getCredential(),
                             loginRequest.getPassword()
                     )
             );
@@ -132,11 +132,11 @@ public class AuthController {
             return ResponseEntity.ok(response);
 
         } catch (AuthenticationException e) {
-            logger.error("Authentication failed for user: {}", loginRequest.getUsername(), e);
+            logger.error("Authentication failed for user: {}", loginRequest.getCredential(), e);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.error("Invalid username or password"));
         } catch (Exception e) {
-            logger.error("Login failed for user: {}", loginRequest.getUsername(), e);
+            logger.error("Login failed for user: {}", loginRequest.getCredential(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("An error occurred during login"));
         }

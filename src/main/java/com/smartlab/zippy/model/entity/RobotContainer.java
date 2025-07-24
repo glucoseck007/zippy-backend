@@ -21,7 +21,10 @@ public class RobotContainer {
     
     @Column(name = "robot_id")
     private UUID robotId;
-    
+
+    @Column(name = "container_code", unique = true)
+    private String containerCode;
+
     private String status;
     
     @ManyToOne(fetch = FetchType.LAZY)

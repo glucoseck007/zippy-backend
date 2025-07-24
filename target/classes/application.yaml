@@ -1,3 +1,5 @@
+server:
+  port: 8080
 spring:
   application:
     name: zippy-backend
@@ -49,3 +51,21 @@ application:
         expiration: 3600000
       refresh-token:
         expiration: 604800000
+mqtt:
+    broker: tcp://localhost:1883
+    client-id: mqtt-listener-service
+    username: khanhnc
+    password: 12345678
+    inboundTopics:
+      - robot/+/location
+      - robot/+/battery
+      - robot/+/status
+      - robot/+/container/+/status
+    outboundTopics:
+      - robot/+/command/move
+      - robot/+/container/+/command/load
+      - robot/+/container/+/command/pickup
+    qos: 1
+
+app:
+  load-dummy-data: false

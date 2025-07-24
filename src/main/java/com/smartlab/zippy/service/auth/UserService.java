@@ -1,6 +1,6 @@
 package com.smartlab.zippy.service.auth;
 
-import com.smartlab.zippy.model.dto.request.auth.RegisterRequest;
+import com.smartlab.zippy.model.dto.web.request.auth.RegisterRequest;
 import com.smartlab.zippy.model.entity.Role;
 import com.smartlab.zippy.model.entity.User;
 import com.smartlab.zippy.repository.RoleRepository;

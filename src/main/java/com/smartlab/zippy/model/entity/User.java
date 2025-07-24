@@ -32,6 +32,8 @@ public class User {
     
     private String phone;
 
+    private String address;
+
     @Column(unique = true)
     private String username;
     
