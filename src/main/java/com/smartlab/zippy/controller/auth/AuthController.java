@@ -245,7 +245,7 @@ public class AuthController {
 //            return ResponseEntity.ok(ApiResponse.success("OTP verification successful"));
             return ResponseEntity.ok(
                     ApiResponse.success(
-                            VerifyResponse.builder().build(), "OTP verification successful"
+                            VerifyResponse.builder().success(true).build(), "OTP verification successful"
                     )
             );
         } else {

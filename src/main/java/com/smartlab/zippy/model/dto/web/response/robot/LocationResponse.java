@@ -13,4 +13,5 @@ public class LocationResponse {
     private String robotCode;
     private double lat;
     private double lon;
+    private String roomCode;
 }

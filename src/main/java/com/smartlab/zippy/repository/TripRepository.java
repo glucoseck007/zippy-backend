@@ -1,15 +1,25 @@
 package com.smartlab.zippy.repository;
 
 import com.smartlab.zippy.model.entity.Trip;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface TripRepository extends CrudRepository<Trip, UUID> {
     List<Trip> findByUserId(UUID userId);
     List<Trip> findByRobotId(UUID robotId);
+
+    Optional<Trip> findByTripCode(String tripCode);
+
+    @Query("SELECT t FROM Trip t WHERE t.robotId = :robotId AND t.status = 'ACTIVE'")
+    Optional<Trip> findActiveByRobotId(@Param("robotId") UUID robotId);
+
+    @Query("SELECT t FROM Trip t JOIN t.robot r WHERE r.code = :robotCode AND t.status = 'ACTIVE'")
+    Optional<Trip> findActiveByRobotCode(@Param("robotCode") String robotCode);
 }

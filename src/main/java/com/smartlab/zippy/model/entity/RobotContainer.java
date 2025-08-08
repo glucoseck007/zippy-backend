@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,6 +15,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Entity
 @Table(name = "robot_container")
+@ToString(exclude = {"robot", "products"}) // Exclude circular reference fields
 public class RobotContainer {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

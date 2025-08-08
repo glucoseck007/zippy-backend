@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,9 +20,12 @@ public class Trip {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
     
+    @Column(name = "trip_code", unique = true)
+    private String tripCode;
+
     @Column(name = "start_point")
     private String startPoint;
-    
+
     @Column(name = "end_point")
     private String endPoint;
     
@@ -31,6 +35,14 @@ public class Trip {
     @Column(name = "robot_id")
     private UUID robotId;
     
+    private String status;
+
+    @Column(name = "start_time")
+    private LocalDateTime startTime;
+
+    @Column(name = "end_time")
+    private LocalDateTime endTime;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", insertable = false, updatable = false)
     private User user;

@@ -15,7 +15,11 @@ import java.util.UUID;
 public interface RobotContainerRepository extends CrudRepository<RobotContainer, Long> {
     List<RobotContainer> findByRobotId(UUID robotId);
     List<RobotContainer> findByStatus(String status);
+    Optional<RobotContainer> findByContainerCode(String containerCode);
 
     @Query("SELECT rc FROM RobotContainer rc JOIN rc.robot r WHERE r.code = :robotCode AND rc.containerCode = :containerCode")
     Optional<RobotContainer> findByRobotCodeAndContainerCode(@Param("robotCode") String robotCode, @Param("containerCode") String containerCode);
+
+    @Query("SELECT rc FROM RobotContainer rc JOIN rc.robot r WHERE r.code = :robotCode")
+    List<RobotContainer> findByRobotCode(@Param("robotCode") String robotCode);
 }

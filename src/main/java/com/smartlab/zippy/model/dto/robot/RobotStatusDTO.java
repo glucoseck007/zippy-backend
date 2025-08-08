@@ -10,5 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RobotStatusDTO {
+    private String robotCode; // Unique identifier for the robot
     private String status; // "free" or "non-free"
 }

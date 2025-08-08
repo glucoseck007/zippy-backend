@@ -15,8 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.Map;
 
 /**
@@ -34,6 +36,9 @@ public class RobotDataService {
     // Track robot connection status and last seen time
     private final Map<String, LocalDateTime> robotLastSeen = new ConcurrentHashMap<>();
     private final Map<String, Boolean> robotConnectionStatus = new ConcurrentHashMap<>();
+
+    // Scheduler for async database persistence
+    private final ScheduledExecutorService persistenceScheduler = Executors.newScheduledThreadPool(2);
 
     private static final int ROBOT_OFFLINE_THRESHOLD_MINUTES = 5;
 
@@ -87,16 +92,16 @@ public class RobotDataService {
      * Get robot location with intelligent fallback
      */
     public Optional<RobotLocationDTO> getLocation(String robotId) {
-        // Try cache first if robot is online
         if (isRobotOnline(robotId)) {
             Optional<RobotLocationDTO> cached = robotStateCache.getLocation(robotId);
             if (cached.isPresent()) {
+                // Schedule persistence to database after successful return
+                scheduleCachePersistence(() -> persistLocationToDatabase(robotId, cached.get()));
                 return cached;
             }
         }
-
-        // Fallback to database
-        return getLocationFromDatabase(robotId);
+        // Only return data if robot is online and data is in cache
+        return Optional.empty();
     }
 
     /**
@@ -106,11 +111,14 @@ public class RobotDataService {
         if (isRobotOnline(robotId)) {
             Optional<RobotBatteryDTO> cached = robotStateCache.getBattery(robotId);
             if (cached.isPresent()) {
+                // Schedule persistence to database after successful return
+                scheduleCachePersistence(() -> persistBatteryToDatabase(robotId, cached.get()));
                 return cached;
             }
         }
 
-        return getBatteryFromDatabase(robotId);
+        // Only return data if robot is online and data is in cache
+        return Optional.empty();
     }
 
     /**
@@ -120,11 +128,14 @@ public class RobotDataService {
         if (isRobotOnline(robotId)) {
             Optional<RobotStatusDTO> cached = robotStateCache.getStatus(robotId);
             if (cached.isPresent()) {
+                // Schedule persistence to database after successful return
+                scheduleCachePersistence(() -> persistStatusToDatabase(robotId, cached.get()));
                 return cached;
             }
         }
 
-        return getStatusFromDatabase(robotId);
+        // Only return data if robot is online and data is in cache
+        return Optional.empty();
     }
 
     /**
@@ -134,11 +145,13 @@ public class RobotDataService {
         if (isRobotOnline(robotId)) {
             Optional<RobotContainerStatusDTO> cached = robotStateCache.getContainerStatus(robotId, containerCode);
             if (cached.isPresent()) {
+                // Schedule persistence to database after successful return
+                scheduleCachePersistence(() -> persistContainerStatusToDatabase(robotId, containerCode, cached.get()));
                 return cached;
             }
         }
-
-        return getContainerStatusFromDatabase(robotId, containerCode);
+        // Only return data if robot is online and data is in cache
+        return Optional.empty();
     }
 
     /**
@@ -184,6 +197,56 @@ public class RobotDataService {
             "online", isRobotOnline(robotId),
             "lastSeen", robotLastSeen.get(robotId)
         );
+    }
+
+    /**
+     * Handle robot heartbeat/status message sent every 5 minutes
+     * This method updates the robot's online status when receiving periodic status messages
+     */
+    @Transactional
+    public void handleRobotHeartbeat(String robotId, RobotStatusDTO status) {
+        log.debug("Received heartbeat from robot: {}", robotId);
+
+        // Update the robot status in cache
+        robotStateCache.updateStatus(robotId, status);
+
+        // Mark robot as online and update last seen time
+        markRobotOnline(robotId);
+
+        // Persist status to database
+        persistStatusToDatabase(robotId, status);
+
+        log.info("Robot {} status updated: {}",
+                robotId, status.getStatus());
+    }
+
+    /**
+     * Handle robot heartbeat without status data (simple ping)
+     * This method can be used when robot only sends a simple "I'm alive" message
+     */
+    @Transactional
+    public void handleRobotHeartbeat(String robotId) {
+        log.debug("Received heartbeat ping from robot: {}", robotId);
+
+        // Mark robot as online and update last seen time
+        markRobotOnline(robotId);
+
+        log.info("Robot {} heartbeat received - marked as online", robotId);
+    }
+
+    /**
+     * Schedule cache persistence to database after successful return
+     * This ensures data is persisted asynchronously after serving from cache
+     */
+    private void scheduleCachePersistence(Runnable persistenceTask) {
+        persistenceScheduler.schedule(() -> {
+            try {
+                persistenceTask.run();
+                log.debug("Cache data successfully persisted to database");
+            } catch (Exception e) {
+                log.error("Failed to persist cache data to database", e);
+            }
+        }, 1, TimeUnit.SECONDS); // Execute immediately after return
     }
 
     // Private helper methods for database operations
@@ -294,5 +357,21 @@ public class RobotDataService {
             log.error("Failed to get container status from database for robot {} container {}", robotId, containerCode, e);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Shutdown the persistence scheduler gracefully
+     */
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        persistenceScheduler.shutdown();
+        try {
+            if (!persistenceScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                persistenceScheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            persistenceScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

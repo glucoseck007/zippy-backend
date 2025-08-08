@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import org.hibernate.annotations.GenericGenerator;
 
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Entity
 @Table(name = "robot")
+@ToString(exclude = {"trips", "containers"}) // Exclude circular reference fields
 public class Robot {
     @Id
     @GeneratedValue(generator = "UUID")

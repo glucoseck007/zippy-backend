@@ -9,7 +9,6 @@ import lombok.*;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class StatusResponse {
-
     private String robotCode;
     private String status;
 }

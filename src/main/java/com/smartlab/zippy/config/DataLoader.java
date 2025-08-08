@@ -21,6 +21,8 @@ public class DataLoader {
     @Value("${app.load-dummy-data:false}")
     private boolean loadDummyData;
 
+    private static boolean flag = false;
+
     private final DataSource dataSource;
 
     public DataLoader(DataSource dataSource) {
@@ -29,28 +31,21 @@ public class DataLoader {
 
     @Bean
     @Profile("!test") // Don't run this for test profiles
-    public CommandLineRunner loadData(RoleRepository roleRepository) {
+    public CommandLineRunner initDatabase() throws Exception {
         return args -> {
-            // Initialize roles if they don't exist
-            if (roleRepository.count() == 0) {
-                roleRepository.save(new Role(null, "ADMIN", null));
-                roleRepository.save(new Role(null, "USER", null));
-                log.info("Sample roles have been initialized");
-            }
+            if (loadDummyData && !flag) {
+                flag = true; // Prevent multiple executions
+                log.info("Loading dummy data into the database...");
 
-            // Load dummy robot data if enabled
-            if (loadDummyData) {
+                Resource resource = new ClassPathResource("data/dummy_data.sql");
                 try {
-                    log.info("Loading dummy robot data...");
-                    // Load from classpath resources
-                    Resource resource = new ClassPathResource("data/dummy_robot.sql");
                     ScriptUtils.executeSqlScript(dataSource.getConnection(), resource);
-                    log.info("Dummy robot data loaded successfully!");
+                    log.info("Dummy data loaded successfully.");
                 } catch (Exception e) {
-                    log.error("Failed to load dummy data", e);
+                    log.error("Failed to load dummy data: {}", e.getMessage(), e);
                 }
             } else {
-                log.info("Dummy data loading is disabled. Set app.load-dummy-data=true to enable.");
+                log.info("Dummy data loading is disabled. Set 'app.load-dummy-data' to true to enable.");
             }
         };
     }

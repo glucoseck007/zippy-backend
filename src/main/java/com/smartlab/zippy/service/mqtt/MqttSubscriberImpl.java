@@ -28,13 +28,15 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
 
     // Regex patterns for topic matching
     private static final Pattern CONTAINER_STATUS_PATTERN =
-            Pattern.compile("robot/([^/]+)/container/(\\d+)/status");
+            Pattern.compile("robot/([^/]+)/container/([^/]+)/status");
     private static final Pattern LOCATION_PATTERN =
             Pattern.compile("robot/([^/]+)/location");
     private static final Pattern BATTERY_PATTERN =
             Pattern.compile("robot/([^/]+)/battery");
     private static final Pattern STATUS_PATTERN =
             Pattern.compile("robot/([^/]+)/status");
+    private static final Pattern TRIP_STATUS_PATTERN =
+            Pattern.compile("robot/([^/]+)/trip/([^/]+)");
 
     public MqttSubscriberImpl(
             RobotMessageService robotMessageService,
@@ -130,6 +132,7 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             subscribe("robot/+/location");
             subscribe("robot/+/battery");
             subscribe("robot/+/status");
+            subscribe("robot/+/trip/+");
             log.info("Subscribed to robot topics");
         } catch (Exception e) {
             log.error("Failed to subscribe to robot topics", e);
@@ -184,6 +187,14 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
         if (statusMatcher.matches()) {
             String robotId = statusMatcher.group(1);
             robotMessageService.handleStatus(robotId, payload);
+            return;
+        }
+
+        Matcher tripStatusMatcher = TRIP_STATUS_PATTERN.matcher(topic);
+        if (tripStatusMatcher.matches()) {
+            String robotId = tripStatusMatcher.group(1);
+            String tripId = tripStatusMatcher.group(2);
+            robotMessageService.handleTripStatus(robotId, tripId, payload);
             return;
         }
 

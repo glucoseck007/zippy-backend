@@ -21,6 +21,12 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
     
+    @Column(name = "order_code", unique = true)
+    private String orderCode;
+    
+    @Column(name = "user_id")
+    private UUID userId;
+
     @Column(name = "trip_id")
     private UUID tripId;
     

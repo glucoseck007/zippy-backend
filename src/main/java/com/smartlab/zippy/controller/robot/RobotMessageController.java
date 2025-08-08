@@ -74,14 +74,15 @@ public class RobotMessageController {
         Optional<RobotLocationDTO> locationOpt = robotDataService.getLocation(robotCode);
         if (locationOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(
-                "No location information available for robot "
+                "No location information available for robot " + robotCode
             ));
         } else {
             RobotLocationDTO location = locationOpt.get();
             LocationResponse response = new LocationResponse(
                     robotCode,
                     location.getLat(),
-                    location.getLon()
+                    location.getLon(),
+                    location.getRoomCode()
             );
             return ResponseEntity.ok(ApiResponse.success(response));
         }

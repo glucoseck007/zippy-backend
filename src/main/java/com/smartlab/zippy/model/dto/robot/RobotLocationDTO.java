@@ -10,4 +10,5 @@ import lombok.*;
 public class RobotLocationDTO {
     private double lat;
     private double lon;
+    private String roomCode;
 }

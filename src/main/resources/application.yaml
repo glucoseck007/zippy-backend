@@ -1,5 +1,6 @@
 server:
   port: 8080
+  address: 0.0.0.0
 spring:
   application:
     name: zippy-backend
@@ -28,16 +29,16 @@ spring:
     open-in-view: false
   mail:
     host: smtp.phamanh.io.vn
-    port: 587
+    port: 465
     username: zippy@phamanh.io.vn
     password: TiinJzRyX4Aqr0
+    protocol: smtp
     properties:
       mail:
         smtp:
           auth: true
-          starttls:
+          ssl:
             enable: true
-            required: true
   data:
     redis:
       host: localhost
@@ -61,11 +62,14 @@ mqtt:
       - robot/+/battery
       - robot/+/status
       - robot/+/container/+/status
+      - robot/+/trip/+
     outboundTopics:
       - robot/+/command/move
-      - robot/+/container/+/command/load
-      - robot/+/container/+/command/pickup
+      - robot/+/command/request-status
+      - robot/+/container/+/command/trip/+/load
+      - robot/+/container/+/command/trip/+/pickup
+      - robot/+/command/trip/+/move
     qos: 1
 
 app:
-  load-dummy-data: false
+  load-dummy-data: true

@@ -12,4 +12,5 @@ import lombok.Setter;
 public class MoveCommandRequest {
     private double lat;
     private double lon;
+    private String roomCode;
 }

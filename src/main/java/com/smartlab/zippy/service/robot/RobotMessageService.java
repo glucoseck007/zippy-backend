@@ -6,6 +6,7 @@ import com.smartlab.zippy.model.dto.robot.RobotBatteryDTO;
 import com.smartlab.zippy.model.dto.robot.RobotContainerStatusDTO;
 import com.smartlab.zippy.model.dto.robot.RobotLocationDTO;
 import com.smartlab.zippy.model.dto.robot.RobotStatusDTO;
+import com.smartlab.zippy.service.trip.TripStatusService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class RobotMessageService {
 
     private final ObjectMapper objectMapper;
     private final RobotDataService robotDataService;
+    private final TripStatusService tripStatusService;
 
     /**
      * Handle container status message from robot
@@ -80,9 +82,32 @@ public class RobotMessageService {
         try {
             RobotStatusDTO status = objectMapper.readValue(payload, RobotStatusDTO.class);
             log.info("Robot {} status: {}", robotId, status.getStatus());
-            robotDataService.updateStatus(robotId, status);
+
+            // Use heartbeat handler for status messages (sent every 5 minutes)
+            // This ensures proper online status tracking
+            robotDataService.handleRobotHeartbeat(robotId, status);
         } catch (JsonProcessingException e) {
             log.error("Failed to parse status payload: {}", payload, e);
+
+            // If payload parsing fails, still mark robot as online (simple heartbeat)
+            // This handles cases where robots send simple status pings
+            robotDataService.handleRobotHeartbeat(robotId);
+        }
+    }
+
+    /**
+     * Handle robot trip status message
+     *
+     * @param robotId Robot ID
+     * @param tripCode Trip code from the topic
+     * @param payload JSON payload containing progress
+     */
+    public void handleTripStatus(String robotId, String tripCode, String payload) {
+        try {
+            log.info("Received trip status for robot: {}, tripCode: {}, payload: {}", robotId, tripCode, payload);
+            tripStatusService.handleTripStatus(robotId, tripCode, payload);
+        } catch (Exception e) {
+            log.error("Failed to handle trip status for robot {} trip {}", robotId, tripCode, e);
         }
     }
 

@@ -7,9 +7,10 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
-public interface RobotRepository extends CrudRepository<Robot, Long> {
+public interface RobotRepository extends CrudRepository<Robot, UUID> {
     Optional<Robot> findByCode(String code);
     List<Robot> findByBatteryStatus(String batteryStatus);
 }
