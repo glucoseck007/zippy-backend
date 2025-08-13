@@ -114,6 +114,10 @@ public class AuthController {
             // Get user details from the authentication object
             UserDetails userDetails = (UserDetails) authentication.getPrincipal();
 
+            // Revoke all existing refresh tokens for this user before issuing new ones
+            logger.info("Revoking all existing tokens for user: {}", userDetails.getUsername());
+            tokenService.revokeAllUserTokens(userDetails.getUsername());
+
             // Generate access and refresh tokens
             String accessToken = jwtService.generateAccessToken(userDetails);
             String refreshToken = jwtService.generateRefreshToken(userDetails);

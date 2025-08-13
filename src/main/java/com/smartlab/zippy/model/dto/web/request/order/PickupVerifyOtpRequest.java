@@ -19,7 +19,7 @@ public class PickupVerifyOtpRequest {
     @NotBlank(message = "OTP is required")
     @Pattern(regexp = "^[0-9]{6}$", message = "OTP must be 6 digits")
     private String otp;
-
+    
     @NotBlank(message = "Trip code is required")
     private String tripCode;
 }

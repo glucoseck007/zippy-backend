@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -14,6 +15,9 @@ public class TokenService {
     private static final Logger log = LoggerFactory.getLogger(TokenService.class);
     private final RedisTemplate<String, Object> redisTemplate;
     private final JwtConfig jwtConfig;
+
+    // Constants for Redis keys
+    private static final String USER_TOKENS_PREFIX = "user:tokens:";
 
     public TokenService(RedisTemplate<String, Object> redisTemplate, JwtConfig jwtConfig) {
         this.redisTemplate = redisTemplate;
@@ -68,6 +72,7 @@ public class TokenService {
     public String generateRefreshToken(String username) {
         String token = UUID.randomUUID().toString();
         String key = JwtConfig.REFRESH_TOKEN_PREFIX + token;
+        String userTokensKey = USER_TOKENS_PREFIX + username;
 
         try {
             log.info("Storing refresh token in Redis with key: {}", key);
@@ -75,6 +80,10 @@ public class TokenService {
             // Store username as the value with the refresh token as the key
             redisTemplate.opsForValue().set(key, username);
             redisTemplate.expire(key, jwtConfig.getRefreshTokenExpiration(), TimeUnit.MILLISECONDS);
+
+            // Add token to user's token set for easy revocation
+            redisTemplate.opsForSet().add(userTokensKey, token);
+            redisTemplate.expire(userTokensKey, jwtConfig.getRefreshTokenExpiration(), TimeUnit.MILLISECONDS);
 
             // Verify the token was stored correctly
             Boolean keyExists = redisTemplate.hasKey(key);
@@ -107,14 +116,25 @@ public class TokenService {
         try {
             log.info("Validating refresh token with key: {}", key);
 
-            // First check if key exists
+            // Check if the key exists
             Boolean keyExists = redisTemplate.hasKey(key);
             log.info("Refresh token key exists: {}", keyExists);
 
             if (Boolean.TRUE.equals(keyExists)) {
-                String username = (String) redisTemplate.opsForValue().get(key);
-                log.info("Validation result for token: value={}", username);
-                return username;
+                // Retrieve the expiration time
+                Long ttl = redisTemplate.getExpire(key, TimeUnit.MILLISECONDS);
+                log.info("Token TTL (Time To Live): {} ms", ttl);
+
+                if (ttl != null && ttl > 0) {
+                    // Token is valid and not expired
+                    String username = (String) redisTemplate.opsForValue().get(key);
+                    log.info("Validation result for token: value={}", username);
+                    return username;
+                } else {
+                    // Token has expired
+                    log.warn("Refresh token has expired: {}", key);
+                    return null;
+                }
             } else {
                 log.warn("Refresh token not found in Redis: {}", key);
                 return null;
@@ -131,7 +151,18 @@ public class TokenService {
      */
     public void revokeRefreshToken(String token) {
         String key = JwtConfig.REFRESH_TOKEN_PREFIX + token;
+
+        // Get username before deleting the token
+        String username = (String) redisTemplate.opsForValue().get(key);
+
+        // Delete the token
         redisTemplate.delete(key);
+
+        // Remove token from user's token set
+        if (username != null) {
+            String userTokensKey = USER_TOKENS_PREFIX + username;
+            redisTemplate.opsForSet().remove(userTokensKey, token);
+        }
     }
 
     /**
@@ -159,14 +190,34 @@ public class TokenService {
 
     /**
      * Revoke all tokens for a user by username
-     * To implement this properly with Redis, we would need to maintain a secondary
-     * index mapping usernames to their tokens
-     *
      * @param username The username whose tokens should be revoked
      */
     public void revokeAllUserTokens(String username) {
-        // For a complete implementation, you would store a mapping of username -> tokens
-        // and then iterate through and delete each one
-        // For now, this is a placeholder for that functionality
+        try {
+            String userTokensKey = USER_TOKENS_PREFIX + username;
+
+            // Get all tokens for this user
+            Set<Object> userTokens = redisTemplate.opsForSet().members(userTokensKey);
+
+            if (userTokens != null && !userTokens.isEmpty()) {
+                log.info("Revoking {} tokens for user: {}", userTokens.size(), username);
+
+                // Delete each token
+                for (Object tokenObj : userTokens) {
+                    String token = (String) tokenObj;
+                    String tokenKey = JwtConfig.REFRESH_TOKEN_PREFIX + token;
+                    redisTemplate.delete(tokenKey);
+                }
+
+                // Delete the user's token set
+                redisTemplate.delete(userTokensKey);
+
+                log.info("Successfully revoked all tokens for user: {}", username);
+            } else {
+                log.info("No tokens found for user: {}", username);
+            }
+        } catch (Exception e) {
+            log.error("Error revoking all tokens for user {}: {}", username, e.getMessage(), e);
+        }
     }
 }

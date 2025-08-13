@@ -11,8 +11,10 @@ import com.smartlab.zippy.model.dto.robot.RobotStatusDTO;
 import com.smartlab.zippy.model.dto.robot.RobotContainerStatusDTO;
 import com.smartlab.zippy.model.entity.Robot;
 import com.smartlab.zippy.model.entity.RobotContainer;
+import com.smartlab.zippy.model.entity.Trip;
 import com.smartlab.zippy.repository.RobotRepository;
 import com.smartlab.zippy.repository.RobotContainerRepository;
+import com.smartlab.zippy.repository.TripRepository;
 import com.smartlab.zippy.service.robot.RobotCommandService;
 import com.smartlab.zippy.service.robot.RobotDataService;
 import org.springframework.http.HttpStatus;
@@ -34,15 +36,18 @@ public class RobotCommandController {
     private final RobotDataService robotDataService;
     private final RobotRepository robotRepository;
     private final RobotContainerRepository robotContainerRepository;
+    private final TripRepository tripRepository;
 
     public RobotCommandController(RobotCommandService commandService,
                                 RobotDataService robotDataService,
                                 RobotRepository robotRepository,
-                                RobotContainerRepository robotContainerRepository) {
+                                RobotContainerRepository robotContainerRepository,
+                                TripRepository tripRepository) {
         this.commandService = commandService;
         this.robotDataService = robotDataService;
         this.robotRepository = robotRepository;
         this.robotContainerRepository = robotContainerRepository;
+        this.tripRepository = tripRepository;
     }
 
     /**
