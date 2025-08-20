@@ -1,7 +1,8 @@
 INSERT INTO role (id, role_name)
 VALUES
     (1, 'ADMIN'),
-    (2, 'USER');
+    (2, 'USER'),
+    (3, 'STAFF');
 
 -- Insert 2 robots with auto-generated UUIDs
 INSERT INTO robot (id, code, battery_status, location_realtime)

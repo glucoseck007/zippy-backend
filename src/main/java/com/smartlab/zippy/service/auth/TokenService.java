@@ -15,7 +15,7 @@ public class TokenService {
     private static final Logger log = LoggerFactory.getLogger(TokenService.class);
     private final RedisTemplate<String, Object> redisTemplate;
     private final JwtConfig jwtConfig;
-
+    
     // Constants for Redis keys
     private static final String USER_TOKENS_PREFIX = "user:tokens:";
 
@@ -151,13 +151,13 @@ public class TokenService {
      */
     public void revokeRefreshToken(String token) {
         String key = JwtConfig.REFRESH_TOKEN_PREFIX + token;
-
+        
         // Get username before deleting the token
         String username = (String) redisTemplate.opsForValue().get(key);
-
+        
         // Delete the token
         redisTemplate.delete(key);
-
+        
         // Remove token from user's token set
         if (username != null) {
             String userTokensKey = USER_TOKENS_PREFIX + username;
@@ -195,23 +195,23 @@ public class TokenService {
     public void revokeAllUserTokens(String username) {
         try {
             String userTokensKey = USER_TOKENS_PREFIX + username;
-
+            
             // Get all tokens for this user
             Set<Object> userTokens = redisTemplate.opsForSet().members(userTokensKey);
-
+            
             if (userTokens != null && !userTokens.isEmpty()) {
                 log.info("Revoking {} tokens for user: {}", userTokens.size(), username);
-
+                
                 // Delete each token
                 for (Object tokenObj : userTokens) {
                     String token = (String) tokenObj;
                     String tokenKey = JwtConfig.REFRESH_TOKEN_PREFIX + token;
                     redisTemplate.delete(tokenKey);
                 }
-
+                
                 // Delete the user's token set
                 redisTemplate.delete(userTokensKey);
-
+                
                 log.info("Successfully revoked all tokens for user: {}", username);
             } else {
                 log.info("No tokens found for user: {}", username);

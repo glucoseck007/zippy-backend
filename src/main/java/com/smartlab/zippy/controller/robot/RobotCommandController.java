@@ -325,4 +325,58 @@ public class RobotCommandController {
             ));
         }
     }
+
+    /**
+     * Continue trip execution for robot
+     *
+     * @param robotCode Robot ID
+     * @param tripCode Trip Code
+     * @return Response indicating trip continuation command status
+     */
+    @PostMapping("/{robotCode}/trip/{tripCode}/continue")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> tripCodeContinue(
+            @PathVariable String robotCode,
+            @PathVariable String tripCode) {
+        try {
+            // Validate trip exists and is associated with the robot
+            Optional<Trip> tripOpt = tripRepository.findByTripCodeAndRobotCode(tripCode, robotCode);
+            if (tripOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(
+                    "Trip " + tripCode + " not found for robot " + robotCode
+                ));
+            }
+
+            Trip trip = tripOpt.get();
+
+            // Check if trip is in a state that can be continued
+            if ("completed".equalsIgnoreCase(trip.getStatus()) || "cancelled".equalsIgnoreCase(trip.getStatus())) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(
+                    "Trip " + tripCode + " cannot be continued as it is " + trip.getStatus()
+                ));
+            }
+
+            // Send continue command using the new sendTripContinue method
+            commandService.sendTripContinue(robotCode, tripCode);
+
+            // Update trip status to indicate it's continuing
+            trip.setStatus("continuing");
+            tripRepository.save(trip);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("robotCode", robotCode);
+            response.put("tripCode", tripCode);
+            response.put("status", "continuing");
+            response.put("message", "Trip continuation command sent successfully");
+            response.put("destination", Map.of(
+                "startPoint", trip.getStartPoint(),
+                "endPoint", trip.getEndPoint()
+            ));
+
+            return ResponseEntity.ok(ApiResponse.success(response));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error(
+                "Failed to continue trip " + tripCode + " for robot " + robotCode + ": " + e.getMessage()
+            ));
+        }
+    }
 }

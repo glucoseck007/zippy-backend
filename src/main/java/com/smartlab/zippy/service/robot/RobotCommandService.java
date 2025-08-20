@@ -54,4 +54,10 @@ public class RobotCommandService {
         String payload = String.format("{\"tripCode\":\"%s\",\"load\":%s}", tripCode, load ? "true" : "false");
         publisher.publish(payload, topic);
     }
+
+    public void sendTripContinue(String robotId, String tripCode) {
+        String topic = String.format("robot/%s/command/trip/%s/continue", robotId, tripCode);
+        String payload = String.format("{\"tripCode\":\"%s\",\"action\":\"continue\"}", tripCode);
+        publisher.publish(payload, topic);
+    }
 }

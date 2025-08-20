@@ -9,6 +9,7 @@ import com.smartlab.zippy.model.dto.web.request.order.PickupOtpRequest;
 import com.smartlab.zippy.model.dto.web.request.order.PickupVerifyOtpRequest;
 import com.smartlab.zippy.service.order.PickupOtpService;
 import com.smartlab.zippy.model.dto.web.response.order.PickupResponse;
+import com.smartlab.zippy.service.auth.JwtService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class OrderController {
 
     private final OrderService orderService;
     private final PickupOtpService pickupOtpService;
+    private final JwtService jwtService;
 
     @PostMapping("/create")
     public ResponseEntity<ApiResponse<OrderResponse>> createOrder(@Valid @RequestBody OrderRequest request) {
@@ -70,6 +72,46 @@ public class OrderController {
 
         } catch (Exception e) {
             log.error("Unexpected error retrieving orders: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Internal server error occurred"));
+        }
+    }
+
+    /**
+     * Staff endpoint to get all orders from all users
+     * Only accessible by users with STAFF role
+     */
+    @GetMapping("/staff/all")
+    public ResponseEntity<ApiResponse<List<OrderResponse>>> getAllOrdersForStaff(
+            @RequestHeader("Authorization") String authHeader) {
+        try {
+            // Extract token from Authorization header
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResponse.error("Authorization header is missing or invalid"));
+            }
+
+            String token = authHeader.substring(7); // Remove "Bearer " prefix
+
+            // Extract role from JWT token
+            String role = jwtService.extractClaim(token, claims -> claims.get("role", String.class));
+
+            // Check if user has STAFF role
+            if (!"STAFF".equalsIgnoreCase(role)) {
+                log.warn("Unauthorized access attempt to staff endpoint. User role: {}", role);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(ApiResponse.error("Access denied. Staff role required."));
+            }
+
+            log.info("Staff user requesting all orders from all users");
+            List<OrderResponse> allOrders = orderService.getAllOrders();
+
+            return ResponseEntity.ok(
+                    ApiResponse.success(allOrders, "All orders retrieved successfully for staff")
+            );
+
+        } catch (Exception e) {
+            log.error("Unexpected error retrieving all orders for staff: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Internal server error occurred"));
         }

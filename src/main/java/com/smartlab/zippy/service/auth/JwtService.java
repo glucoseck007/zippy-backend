@@ -7,6 +7,7 @@ import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.Getter;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
@@ -58,6 +59,15 @@ public class JwtService {
             UserDetails userDetails,
             long expiration
     ) {
+        // Extract role from UserDetails authorities
+        String role = userDetails.getAuthorities().stream()
+                .findFirst()
+                .map(GrantedAuthority::getAuthority)
+                .orElse("USER"); // Default role if none found
+
+        // Add role to claims
+        extraClaims.put("role", role);
+
         return Jwts
                 .builder()
                 .setClaims(extraClaims)
