@@ -70,10 +70,10 @@ public class TripService {
         }
 
         return TripResponse.builder()
-                .userId(trip.getUserId())
-                .robotId(trip.getRobotId())
                 .robotCode(robotCode)
                 .tripCode(trip.getTripCode())
+                .startPoint(trip.getStartPoint())
+                .endPoint(trip.getEndPoint())
                 .startTime(trip.getStartTime())
                 .endTime(trip.getEndTime())
                 .status(trip.getStatus())
@@ -103,10 +103,10 @@ public class TripService {
         }
 
         return TripResponse.builder()
-                .userId(order.getUserId())
-                .robotId(trip.getRobotId())
                 .robotCode(robotCode)
                 .tripCode(trip.getTripCode())
+                .startPoint(trip.getStartPoint())
+                .endPoint(trip.getEndPoint())
                 .startTime(trip.getStartTime())
                 .endTime(trip.getEndTime())
                 .status(trip.getStatus())

@@ -6,6 +6,7 @@ import com.smartlab.zippy.model.dto.robot.RobotBatteryDTO;
 import com.smartlab.zippy.model.dto.robot.RobotContainerStatusDTO;
 import com.smartlab.zippy.model.dto.robot.RobotLocationDTO;
 import com.smartlab.zippy.model.dto.robot.RobotStatusDTO;
+import com.smartlab.zippy.model.dto.trip.TripProgressDTO;
 import com.smartlab.zippy.service.trip.TripStatusService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -97,17 +98,23 @@ public class RobotMessageService {
 
     /**
      * Handle robot trip status message
+     * This method processes trip updates from MQTT with format:
+     * Topic: robot/{robotId}/trip/{tripId}
+     * Payload: {progress: double, start_point: roomCode, end_point: roomCode}
      *
      * @param robotId Robot ID
-     * @param tripCode Trip code from the topic
-     * @param payload JSON payload containing progress
+     * @param tripId Trip ID (tripCode)
+     * @param payload JSON payload
      */
-    public void handleTripStatus(String robotId, String tripCode, String payload) {
+    public void handleTripStatus(String robotId, String tripId, String payload) {
         try {
-            log.info("Received trip status for robot: {}, tripCode: {}, payload: {}", robotId, tripCode, payload);
-            tripStatusService.handleTripStatus(robotId, tripCode, payload);
+            log.info("Robot {} trip {} status update: {}", robotId, tripId, payload);
+
+            // Process the trip update using the method in TripStatusService
+            // This will check start_point/end_point matching and update status based on progress
+            tripStatusService.updateTripStatus(tripId, payload);
         } catch (Exception e) {
-            log.error("Failed to handle trip status for robot {} trip {}", robotId, tripCode, e);
+            log.error("Failed to handle trip status for robot {} trip {}", robotId, tripId, e);
         }
     }
 

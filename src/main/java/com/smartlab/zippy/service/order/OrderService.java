@@ -1,5 +1,6 @@
 package com.smartlab.zippy.service.order;
 
+import com.smartlab.zippy.model.dto.web.request.order.BatchOrderRequest;
 import com.smartlab.zippy.model.dto.web.request.order.OrderRequest;
 import com.smartlab.zippy.model.dto.web.response.order.OrderResponse;
 import com.smartlab.zippy.model.dto.robot.RobotContainerStatusDTO;
@@ -11,6 +12,7 @@ import com.smartlab.zippy.model.entity.Trip;
 import com.smartlab.zippy.model.entity.User;
 import com.smartlab.zippy.repository.OrderRepository;
 import com.smartlab.zippy.repository.ProductRepository;
+import com.smartlab.zippy.repository.RobotContainerRepository;
 import com.smartlab.zippy.repository.RobotRepository;
 import com.smartlab.zippy.repository.TripRepository;
 import com.smartlab.zippy.repository.UserRepository;
@@ -42,6 +44,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final TripRepository tripRepository;
+    private final RobotContainerRepository robotContainerRepository;
     private final RobotRepository robotRepository;
     private final UserRepository userRepository;
     private final RobotDataService robotDataService;
@@ -53,18 +56,22 @@ public class OrderService {
 
     @Transactional
     public OrderResponse createOrder(OrderRequest request) {
-        log.info("Creating order for user: {}, product: {}, robot: {}",
-                request.getUsername(), request.getProductName(), request.getRobotCode());
+        log.info("Creating order from sender: {} to receiver: {}, product: {}, robot: {}",
+                request.getSenderIdentifier(), request.getReceiverIdentifier(), request.getProductName(), request.getRobotCode());
 
-        // Find user by username to get userId
-        User user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(() -> new RuntimeException("User not found with username: " + request.getUsername()));
+        // Find sender by email or phone to get userId
+        User sender = findUserByIdentifier(request.getSenderIdentifier())
+                .orElseThrow(() -> new RuntimeException("Sender not found with identifier: " + request.getSenderIdentifier()));
+
+        // Find receiver by email or phone to get receiverId
+        User receiver = findUserByIdentifier(request.getReceiverIdentifier())
+                .orElseThrow(() -> new RuntimeException("Receiver not found with identifier: " + request.getReceiverIdentifier()));
 
         // Validate robot is online and free using cached data
         validateRobotAvailability(request.getRobotCode(), request.getRobotContainerCode());
 
-        // Create or find active trip for the robot (using robotCode to get robotId from cache)
-        Trip trip = findOrCreateActiveTrip(request.getRobotCode(), request.getEndpoint(), user.getId());
+        // Create or find active trip for the robot (now includes robot container ID)
+        Trip trip = findOrCreateActiveTrip(request.getRobotCode(), request.getRobotContainerCode(), request.getStartPoint(), request.getEndpoint(), sender.getId());
 
         // Create new product with auto-generated ID
         Product product = Product.builder()
@@ -78,10 +85,11 @@ public class OrderService {
         // Generate unique order code
         String orderCode = orderCodeGenerator.generateOrderCode();
 
-        // Create order with userId from the found user and the new product ID
+        // Create order with both sender and receiver IDs
         Order order = Order.builder()
                 .orderCode(orderCode)
-                .userId(user.getId())
+                .userId(sender.getId()) // Sender ID
+                .receiverId(receiver.getId()) // Receiver ID
                 .tripId(trip.getId())
                 .productId(savedProduct.getId()) // Use the auto-generated product ID
                 .price(BigDecimal.ZERO) // Default price, can be calculated based on business logic
@@ -91,10 +99,12 @@ public class OrderService {
 
         Order savedOrder = orderRepository.save(order);
 
-        // Build response
+        // Build response with usernames from retrieved User objects
         return OrderResponse.builder()
                 .orderId(savedOrder.getId())
                 .orderCode(savedOrder.getOrderCode())
+                .senderUsername(sender.getUsername())
+                .receiverUsername(receiver.getUsername())
                 .productName(savedProduct.getCode()) // Use product code from saved product
                 .robotCode(request.getRobotCode())
                 .robotContainerCode(request.getRobotContainerCode())
@@ -104,6 +114,120 @@ public class OrderService {
                 .createdAt(savedOrder.getCreatedAt())
                 .completedAt(savedOrder.getCompletedAt())
                 .build();
+    }
+
+    /**
+     * Create multiple orders for different receivers in a single batch
+     * This optimizes the case where one user wants to send to multiple recipients
+     */
+    @Transactional
+    public List<OrderResponse> createBatchOrders(BatchOrderRequest request) {
+        log.info("Creating batch orders from sender: {} to {} recipients",
+                request.getSenderIdentifier(), request.getRecipients().size());
+
+        // Find sender by identifier (email or phone) to get userId
+        User sender = findUserByIdentifier(request.getSenderIdentifier())
+                .orElseThrow(() -> new RuntimeException("Sender not found with identifier: " + request.getSenderIdentifier()));
+
+        // Validate all receivers exist before creating any orders
+        List<User> receivers = new ArrayList<>();
+        for (BatchOrderRequest.OrderRecipient recipient : request.getRecipients()) {
+            User receiver = findUserByIdentifier(recipient.getReceiverIdentifier())
+                    .orElseThrow(() -> new RuntimeException("Receiver not found with identifier: " + recipient.getReceiverIdentifier()));
+            receivers.add(receiver);
+        }
+
+        // Validate robot is online and free using cached data
+        validateRobotAvailability(request.getRobotCode(), request.getRobotContainerCode());
+
+        // Create or find active trip for the robot (shared trip for all orders)
+        Trip trip = findOrCreateActiveTrip(request.getRobotCode(), request.getRobotContainerCode(),
+                                         request.getStartPoint(), request.getEndpoint(), sender.getId());
+
+        List<OrderResponse> responses = new ArrayList<>();
+
+        // Create orders for each recipient
+        for (int i = 0; i < request.getRecipients().size(); i++) {
+            BatchOrderRequest.OrderRecipient recipient = request.getRecipients().get(i);
+            User receiver = receivers.get(i);
+
+            // Create product for this order
+            Product product = Product.builder()
+                    .code(recipient.getProductName())
+                    .tripId(trip.getId())
+                    .containerCode(request.getRobotContainerCode())
+                    .build();
+
+            Product savedProduct = productRepository.save(product);
+
+            // Generate unique order code
+            String orderCode = orderCodeGenerator.generateOrderCode();
+
+            // Create order
+            Order order = Order.builder()
+                    .orderCode(orderCode)
+                    .userId(sender.getId())
+                    .receiverId(receiver.getId())
+                    .tripId(trip.getId())
+                    .productId(savedProduct.getId())
+                    .price(BigDecimal.ZERO)
+                    .status("PENDING")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+
+            Order savedOrder = orderRepository.save(order);
+
+            // Build response with usernames from retrieved User objects
+            OrderResponse response = OrderResponse.builder()
+                    .orderId(savedOrder.getId())
+                    .orderCode(savedOrder.getOrderCode())
+                    .senderUsername(sender.getUsername())
+                    .receiverUsername(receiver.getUsername())
+                    .productName(savedProduct.getCode())
+                    .robotCode(request.getRobotCode())
+                    .robotContainerCode(request.getRobotContainerCode())
+                    .endpoint(request.getEndpoint())
+                    .price(savedOrder.getPrice())
+                    .status(savedOrder.getStatus())
+                    .createdAt(savedOrder.getCreatedAt())
+                    .completedAt(savedOrder.getCompletedAt())
+                    .build();
+
+            responses.add(response);
+        }
+
+        log.info("Successfully created {} orders in batch for sender: {}", responses.size(), request.getSenderIdentifier());
+        return responses;
+    }
+
+    /**
+     * Find user by email, phone number, or username
+     * This method supports flexible user identification using email, phone, or username
+     */
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier == null || identifier.trim().isEmpty()) {
+            return Optional.empty();
+        }
+
+        identifier = identifier.trim();
+
+        // Check if identifier looks like an email (contains @)
+        if (identifier.contains("@")) {
+            log.debug("Looking up user by email: {}", identifier);
+            return userRepository.findByEmail(identifier);
+        } else {
+            // First try to find by phone
+            log.debug("Looking up user by phone: {}", identifier);
+            Optional<User> userByPhone = userRepository.findByPhone(identifier);
+
+            // If not found by phone, try by username
+            if (userByPhone.isEmpty()) {
+                log.debug("Not found by phone, looking up user by username: {}", identifier);
+                return userRepository.findByUsername(identifier);
+            }
+
+            return userByPhone;
+        }
     }
 
     private void validateRobotAvailability(String robotCode, String robotContainerCode) {
@@ -138,24 +262,40 @@ public class OrderService {
         log.info("Robot {} and container {} are available for order", robotCode, robotContainerCode);
     }
 
-    private Trip findOrCreateActiveTrip(String robotCode, String endpoint, UUID userId) {
+    private Trip findOrCreateActiveTrip(String robotCode, String robotContainerCode, String startPoint, String endpoint, UUID userId) {
         // Look for an active trip for the robot code - uses JOIN query to avoid lazy loading issues
         Optional<Trip> activeTrip = tripRepository.findActiveByRobotCode(robotCode);
 
         if (activeTrip.isPresent()) {
             Trip existingTrip = activeTrip.get();
-            // Update trip with endpoint and user ID if not already set
-            if (existingTrip.getEndPoint() == null || existingTrip.getUserId() == null) {
-                existingTrip.setEndPoint(endpoint);
-                existingTrip.setUserId(userId);
+            // Update trip with start point, endpoint, user ID, and robot container ID if not already set
+            if (existingTrip.getStartPoint() == null || existingTrip.getEndPoint() == null ||
+                existingTrip.getUserId() == null || existingTrip.getRobotContainerId() == null) {
+
+                if (existingTrip.getStartPoint() == null) {
+                    existingTrip.setStartPoint(startPoint);
+                }
+                if (existingTrip.getEndPoint() == null) {
+                    existingTrip.setEndPoint(endpoint);
+                }
+                if (existingTrip.getUserId() == null) {
+                    existingTrip.setUserId(userId);
+                }
+
+                // Get and set robot container ID if not already set
+                if (existingTrip.getRobotContainerId() == null) {
+                    Long robotContainerId = getRobotContainerIdByCode(robotCode, robotContainerCode);
+                    existingTrip.setRobotContainerId(robotContainerId);
+                }
+
                 return tripRepository.save(existingTrip);
             }
             return existingTrip;
         }
 
-        // For new trip creation, we need the actual robot UUID from database
-        // This is a minimal database query just to get the robot UUID for trip creation
+        // For new trip creation, we need the actual robot UUID and container ID from database
         UUID robotId = getRobotIdByCode(robotCode);
+        Long robotContainerId = getRobotContainerIdByCode(robotCode, robotContainerCode);
 
         // Generate unique trip code
         String tripCode = tripCodeGenerator.generateTripCode();
@@ -164,7 +304,9 @@ public class OrderService {
         Trip newTrip = Trip.builder()
                 .tripCode(tripCode)
                 .robotId(robotId)
+                .robotContainerId(robotContainerId)
                 .userId(userId)
+                .startPoint(startPoint)
                 .endPoint(endpoint)
                 .status("PENDING") // Trip starts as PENDING, becomes ACTIVE when robot receives move command
                 .startTime(LocalDateTime.now())
@@ -179,6 +321,13 @@ public class OrderService {
         Robot robot = robotRepository.findByCode(robotCode)
                 .orElseThrow(() -> new RuntimeException("Robot not found with code: " + robotCode));
         return robot.getId();
+    }
+
+    private Long getRobotContainerIdByCode(String robotCode, String robotContainerCode) {
+        // Get robot container ID for trip creation
+        return robotContainerRepository.findByRobotCodeAndContainerCode(robotCode, robotContainerCode)
+                .map(robotContainer -> robotContainer.getId())
+                .orElseThrow(() -> new RuntimeException("Robot container not found with robot code: " + robotCode + " and container code: " + robotContainerCode));
     }
 
     public List<OrderResponse> getAllOrders() {
@@ -203,6 +352,38 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Get orders where the user is the sender
+     */
+    public List<OrderResponse> getOrdersBySender(String senderUsername) {
+        log.info("Retrieving orders sent by: {}", senderUsername);
+
+        User sender = userRepository.findByUsername(senderUsername)
+                .orElseThrow(() -> new RuntimeException("Sender not found with username: " + senderUsername));
+
+        List<Order> orders = orderRepository.findByUserId(sender.getId());
+
+        return orders.stream()
+                .map(this::convertToOrderResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get orders where the user is the receiver
+     */
+    public List<OrderResponse> getOrdersByReceiver(String receiverUsername) {
+        log.info("Retrieving orders received by: {}", receiverUsername);
+
+        User receiver = userRepository.findByUsername(receiverUsername)
+                .orElseThrow(() -> new RuntimeException("Receiver not found with username: " + receiverUsername));
+
+        List<Order> orders = orderRepository.findByReceiverId(receiver.getId());
+
+        return orders.stream()
+                .map(this::convertToOrderResponse)
+                .collect(Collectors.toList());
+    }
+
     private OrderResponse convertToOrderResponse(Order order) {
         // Get product information from product table using product ID
         String productName = "N/A";
@@ -215,12 +396,14 @@ public class OrderService {
             }
         }
 
-        // Get robot code and endpoint from trip information
+        // Get robot code, start point, and endpoint from trip information
         String robotCode = "N/A";
+        String startPoint = "N/A";
         String endpoint = "N/A";
         if (order.getTripId() != null) {
             Optional<Trip> trip = tripRepository.findById(order.getTripId());
             if (trip.isPresent()) {
+                startPoint = trip.get().getStartPoint();
                 endpoint = trip.get().getEndPoint();
                 // Get robot code from robot table using robot ID
                 if (trip.get().getRobotId() != null) {
@@ -232,12 +415,33 @@ public class OrderService {
             }
         }
 
+        // Get sender and receiver usernames
+        String senderUsername = "N/A";
+        String receiverUsername = "N/A";
+
+        if (order.getUserId() != null) {
+            Optional<User> sender = userRepository.findById(order.getUserId());
+            if (sender.isPresent()) {
+                senderUsername = sender.get().getUsername();
+            }
+        }
+
+        if (order.getReceiverId() != null) {
+            Optional<User> receiver = userRepository.findById(order.getReceiverId());
+            if (receiver.isPresent()) {
+                receiverUsername = receiver.get().getUsername();
+            }
+        }
+
         return OrderResponse.builder()
                 .orderId(order.getId())
                 .orderCode(order.getOrderCode())
+                .senderUsername(senderUsername)
+                .receiverUsername(receiverUsername)
                 .productName(productName) // Product name from product table
                 .robotCode(robotCode) // Robot code from robot table via trip
                 .robotContainerCode(robotContainerCode) // Container code from product table
+                .startPoint(startPoint) // Start point from trip table
                 .endpoint(endpoint) // Endpoint from trip table
                 .price(order.getPrice())
                 .status(order.getStatus())

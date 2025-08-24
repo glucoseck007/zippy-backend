@@ -27,4 +27,10 @@ public interface OrderRepository extends CrudRepository<Order, UUID> {
            "JOIN o.trip t " +
            "WHERE t.tripCode = :tripCode")
     List<Order> findByTripCode(@Param("tripCode") String tripCode);
+
+    // Query orders by sender ID (userId)
+    List<Order> findByUserId(UUID userId);
+
+    // Query orders by receiver ID
+    List<Order> findByReceiverId(UUID receiverId);
 }

@@ -25,7 +25,10 @@ public class Order {
     private String orderCode;
     
     @Column(name = "user_id")
-    private UUID userId;
+    private UUID userId; // Sender ID
+
+    @Column(name = "receiver_id")
+    private UUID receiverId; // Receiver ID
 
     @Column(name = "trip_id")
     private UUID tripId;
@@ -50,6 +53,14 @@ public class Order {
     @JoinColumn(name = "trip_id", insertable = false, updatable = false)
     private Trip trip;
     
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User sender;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "receiver_id", insertable = false, updatable = false)
+    private User receiver;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL)
     private List<Payment> payments;
 }

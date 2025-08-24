@@ -255,8 +255,15 @@ public class RobotDataService {
             Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
             if (robotOpt.isPresent()) {
                 Robot robot = robotOpt.get();
+                // Store coordinates in locationRealtime field
                 robot.setLocationRealtime(String.format("%.6f,%.6f", location.getLat(), location.getLon()));
+                // Store roomCode in separate field
+                robot.setRoomCode(location.getRoomCode());
                 robotRepository.save(robot);
+                log.debug("Persisted location and roomCode to database for robot {}: lat={}, lon={}, roomCode={}",
+                         robotId, location.getLat(), location.getLon(), location.getRoomCode());
+            } else {
+                log.warn("Robot not found in database with code: {}", robotId);
             }
         } catch (Exception e) {
             log.error("Failed to persist location to database for robot {}", robotId, e);
@@ -303,13 +310,17 @@ public class RobotDataService {
     private Optional<RobotLocationDTO> getLocationFromDatabase(String robotId) {
         try {
             Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
-            if (robotOpt.isPresent() && robotOpt.get().getLocationRealtime() != null) {
-                String[] coords = robotOpt.get().getLocationRealtime().split(",");
-                if (coords.length == 2) {
-                    return Optional.of(RobotLocationDTO.builder()
-                        .lat(Double.parseDouble(coords[0]))
-                        .lon(Double.parseDouble(coords[1]))
-                        .build());
+            if (robotOpt.isPresent()) {
+                Robot robot = robotOpt.get();
+                if (robot.getLocationRealtime() != null) {
+                    String[] coords = robot.getLocationRealtime().split(",");
+                    if (coords.length == 2) {
+                        return Optional.of(RobotLocationDTO.builder()
+                            .lat(Double.parseDouble(coords[0]))
+                            .lon(Double.parseDouble(coords[1]))
+                            .roomCode(robot.getRoomCode()) // Include roomCode from database
+                            .build());
+                    }
                 }
             }
         } catch (Exception e) {

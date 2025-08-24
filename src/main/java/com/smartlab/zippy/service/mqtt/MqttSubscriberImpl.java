@@ -37,6 +37,10 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             Pattern.compile("robot/([^/]+)/status");
     private static final Pattern TRIP_STATUS_PATTERN =
             Pattern.compile("robot/([^/]+)/trip/([^/]+)");
+    private static final Pattern TRIP_START_POINT_PATTERN =
+            Pattern.compile("robot/([^/]+)/trip/([^/]+)/start_point");
+    private static final Pattern TRIP_END_POINT_PATTERN =
+            Pattern.compile("robot/([^/]+)/trip/([^/]+)/end_point");
 
     public MqttSubscriberImpl(
             RobotMessageService robotMessageService,
@@ -197,6 +201,22 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             robotMessageService.handleTripStatus(robotId, tripId, payload);
             return;
         }
+
+//        Matcher tripStartPointMatcher = TRIP_START_POINT_PATTERN.matcher(topic);
+//        if (tripStartPointMatcher.matches()) {
+//            String robotId = tripStartPointMatcher.group(1);
+//            String tripId = tripStartPointMatcher.group(2);
+//            robotMessageService.handleTripStartPoint(robotId, tripId, payload);
+//            return;
+//        }
+//
+//        Matcher tripEndPointMatcher = TRIP_END_POINT_PATTERN.matcher(topic);
+//        if (tripEndPointMatcher.matches()) {
+//            String robotId = tripEndPointMatcher.group(1);
+//            String tripId = tripEndPointMatcher.group(2);
+//            robotMessageService.handleTripEndPoint(robotId, tripId, payload);
+//            return;
+//        }
 
         log.warn("Received message on unhandled topic: {}", topic);
     }

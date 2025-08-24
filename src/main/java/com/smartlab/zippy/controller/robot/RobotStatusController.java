@@ -8,6 +8,8 @@ import com.smartlab.zippy.service.robot.RobotStatusService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/robot/status/{robotId}")
 public class RobotStatusController {
@@ -22,7 +24,7 @@ public class RobotStatusController {
      * Get robot location by robot ID
      *
      * @param robotId Robot ID
-     * @return Location data
+     * @return Location data including roomCode, lat, and lon
      */
     @GetMapping("/location")
     public ResponseEntity<RobotLocationDTO> getRobotLocation(@PathVariable String robotId) {
@@ -63,5 +65,16 @@ public class RobotStatusController {
             @PathVariable String robotId,
             @PathVariable String containerCode) {
         return ResponseEntity.ok(robotStatusService.getContainerStatus(robotId, containerCode));
+    }
+
+    /**
+     * Get robots by room code
+     *
+     * @param roomCode Room code to filter robots
+     * @return List of robots currently in the specified room
+     */
+    @GetMapping("/room/{roomCode}")
+    public ResponseEntity<List<RobotLocationDTO>> getRobotsByRoom(@PathVariable String roomCode) {
+        return ResponseEntity.ok(robotStatusService.getRobotsByRoom(roomCode));
     }
 }

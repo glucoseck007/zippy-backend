@@ -20,9 +20,12 @@ public class OrderResponse {
 
     private UUID orderId;
     private String orderCode;
+    private String senderUsername;
+    private String receiverUsername;
     private String productName;
     private String robotCode;
     private String robotContainerCode;
+    private String startPoint;
     private String endpoint;
     private BigDecimal price;
     private String status;

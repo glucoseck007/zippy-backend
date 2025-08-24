@@ -35,6 +35,9 @@ public class Trip {
     @Column(name = "robot_id")
     private UUID robotId;
     
+    @Column(name = "robot_container_id")
+    private Long robotContainerId;
+
     private String status;
 
     @Column(name = "start_time")
@@ -51,6 +54,10 @@ public class Trip {
     @JoinColumn(name = "robot_id", insertable = false, updatable = false)
     private Robot robot;
     
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "robot_container_id", insertable = false, updatable = false)
+    private RobotContainer robotContainer;
+
     @OneToMany(mappedBy = "trip", cascade = CascadeType.ALL)
     private List<Order> orders;
     

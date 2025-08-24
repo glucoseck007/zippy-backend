@@ -33,6 +33,9 @@ public class Robot {
     @Column(name = "location_realtime")
     private String locationRealtime;
     
+    @Column(name = "room_code")
+    private String roomCode;
+
     @OneToMany(mappedBy = "robot", cascade = CascadeType.ALL)
     private List<Trip> trips;
     

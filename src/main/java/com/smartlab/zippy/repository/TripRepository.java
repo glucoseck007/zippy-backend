@@ -20,9 +20,11 @@ public interface TripRepository extends CrudRepository<Trip, UUID> {
     @Query("SELECT t FROM Trip t WHERE t.robotId = :robotId AND t.status = 'ACTIVE'")
     Optional<Trip> findActiveByRobotId(@Param("robotId") UUID robotId);
 
-    @Query("SELECT t FROM Trip t JOIN t.robot r WHERE r.code = :robotCode AND t.status = 'ACTIVE'")
+    @Query("SELECT t FROM Trip t JOIN Robot r ON t.robotId = r.id WHERE r.code = :robotCode AND t.status IN ('PENDING', 'ACTIVE')")
     Optional<Trip> findActiveByRobotCode(@Param("robotCode") String robotCode);
 
     @Query("SELECT t FROM Trip t JOIN t.robot r WHERE t.tripCode = :tripCode AND r.code = :robotCode")
     Optional<Trip> findByTripCodeAndRobotCode(@Param("tripCode") String tripCode, @Param("robotCode") String robotCode);
+
+    List<Trip> findByStatusIn(List<String> statuses);
 }

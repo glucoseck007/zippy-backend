@@ -13,4 +13,5 @@ import java.util.UUID;
 public interface RobotRepository extends CrudRepository<Robot, UUID> {
     Optional<Robot> findByCode(String code);
     List<Robot> findByBatteryStatus(String batteryStatus);
+    List<Robot> findByRoomCode(String roomCode);
 }

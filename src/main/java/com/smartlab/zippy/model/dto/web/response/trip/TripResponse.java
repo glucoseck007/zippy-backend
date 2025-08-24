@@ -6,17 +6,16 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class TripResponse {
-    private UUID userId;
-    private UUID robotId;
     private String robotCode;
     private String tripCode;
+    private String startPoint;
+    private String endPoint;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String status;

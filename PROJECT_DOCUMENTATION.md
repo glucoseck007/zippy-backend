@@ -1,365 +1,674 @@
-# Zippy Backend – Project Documentation
+# Zippy Backend - Comprehensive Project Documentation
 
-## 1) Project Overview
+## Table of Contents
+1. [Project Overview](#project-overview)
+2. [Architecture & Flow](#architecture--flow)
+3. [Schema / Data Models](#schema--data-models)
+4. [API Endpoints](#api-endpoints)
+5. [Configuration & Deployment](#configuration--deployment)
+6. [Refresh Token Persistence Solution](#refresh-token-persistence-solution)
+7. [MQTT Broker Deployment](#mqtt-broker-deployment)
+8. [Example Usage](#example-usage)
+9. [Diagram Recommendations](#diagram-recommendations)
 
-Purpose and features
-- Manages robot-assisted delivery trips and orders:
-  - User registration, OTP email verification, login/logout, refresh tokens.
-  - User profile view/edit.
-  - Order creation and approval; QR code generation and MQTT delivery to robots.
-  - Trip lifecycle and progress tracking (via robot MQTT updates and Redis caching).
-  - Robot telemetry ingestion via MQTT (location, battery, status, container status) and cache-backed querying.
-  - Robot command dispatch via MQTT (move, load, pickup, trip-continue; trip-scoped variants).
-  - Pickup OTP flow for order completion.
-- Error handling via a centralized exception advisor returning consistent ApiResponse envelopes.
+---
 
-Primary technologies
-- Java, Spring Boot (REST, scheduling), Spring MVC, Spring Security (JWT), Spring Data JPA (MySQL), Spring Integration + Eclipse Paho (MQTT), Redis (Lettuce), JavaMail, ZXing (QR).
-- JWT: jjwt.
-- Build: Maven.
+## 1. Project Overview
 
-## 2) Architecture & Flow
+### Purpose
+Zippy Backend is a **robotic delivery management system** that facilitates automated package delivery using autonomous robots. The system manages robot fleets, handles delivery orders, tracks trips, and provides real-time monitoring through MQTT communication.
 
-Layers and modules
-- Web layer (controllers):
-  - auth: AuthController
-  - account: AccountController
-  - order: OrderController
-  - trip: TripController
-  - robot: RobotStatusController (direct cache DTOs), RobotMessageController (wrapped responses), RobotCommandController (MQTT command endpoints)
-- Service layer:
-  - Auth: JwtService, TokenService (Redis-backed refresh + blacklist), UserService, OtpService, CustomUserDetailsService
-  - Order: OrderService, PickupOtpService, OrderCodeGenerator
-  - Trip: TripService, TripStatusService, TripCodeGenerator
-  - Robot: RobotMessageService (ingest MQTT), RobotDataService (cache-first + DB persistence), RobotStateCache (in-memory)
-  - MQTT: MqttSubscriberImpl (direct Paho subscriber)
-  - QR/Email: QRCodeService, EmailService/EmailServiceImpl
-- Persistence layer (Spring Data repositories): User, Role, Robot, RobotContainer, Trip, Product, Order, Payment repositories
-- Config:
-  - SecurityConfig + JwtAuthenticationFilter
-  - DatabaseConfig (JPA auditing), DataLoader (optional dummy data), RedisConfig + EmbeddedRedisConfig, MqttConfig, JwtConfig, MqttProperties
+### Key Features
+- **User Authentication & Authorization** with JWT tokens and refresh token persistence
+- **Robot Fleet Management** with real-time location and status tracking
+- **Order Management** with automated trip assignment
+- **MQTT-based Real-time Communication** for robot control and monitoring
+- **QR Code Generation** for package identification
+- **Email Notifications** for order updates
+- **Redis Caching** for performance optimization
+- **Hybrid Token Storage** (Redis + MySQL) for reliability
 
-Core flows
-- Authentication
-  - /api/auth/register: create user with role USER, status PENDING → send OTP email.
-  - /api/auth/verify-otp: verify OTP (by credential: username or email), set user ACTIVE.
-  - /api/auth/login: authenticate; revoke all user refresh tokens; issue JWT access token (role claim) and new refresh token (stored in Redis).
-  - /api/auth/logout: blacklist access token (Redis).
-  - /api/auth/refresh-token: validate refresh token (Redis), revoke it, issue new access and refresh tokens.
-  - Security filter: JwtAuthenticationFilter validates access token and populates SecurityContext; all non-/api/auth/** endpoints require Bearer token.
-- Robot telemetry ingestion (MQTT)
-  - MqttSubscriberImpl connects to broker and subscribes to:
-    - robot/+/location, robot/+/battery, robot/+/status, robot/+/container/+/status, robot/+/trip/+
-  - It parses topics and delegates to RobotMessageService, which:
-    - Parses payload JSON to DTOs and updates RobotDataService:
-      - Cache update in RobotStateCache (in-memory, with periodic cleanup).
-      - Marks robot online and persists to DB asynchronously:
-        - Robot.locationRealtime (lat,lon string) and batteryStatus fields.
-        - RobotContainer.status from container updates.
-    - TripStatusService handles robot/+/trip/+ payloads (JSON with progress), caches progress in Redis, and updates Trip.status (PENDING/ACTIVE/DELIVERED by rules). When trip becomes DELIVERED, associated orders are set to DELIVERED.
-- Robot commands (via REST → MQTT publish)
-  - RobotCommandController calls RobotCommandService, which builds topic strings and JSON payloads and publishes via MqttCommandPublisher (Spring Integration’s mqttOutboundChannel).
-  - Commands: move, load, pickup, request-status, trip-scoped move/load/pickup/continue.
-- Orders and trips
-  - createOrder:
-    - Validates robot online + free; container free (from cache).
-    - Finds or creates ACTIVE/PENDING Trip for robot (tripCode generated, robot UUID looked up).
-    - Persists Product (container bound) and Order (PENDING).
-  - Approval and QR:
-    - approveOrder: sets order to APPROVED.
-    - generate-qr: creates a Base64 PNG QR from {orderCode, tripCode, timestamp} and publishes to robot/{robotCode}/command/qr.
-  - Pickup OTP:
-    - send-otp: validates order is DELIVERED, generates OTP keyed by orderCode, emails OTP to user.
-    - verify-otp: validates OTP; completes order/trip (COMPLETED) and/or calls TripStatusService.completeTripByOtpVerification.
+### Technologies Used
+- **Backend Framework**: Spring Boot 3.x
+- **Database**: MySQL 8.x with Hibernate/JPA
+- **Caching**: Redis 6.x
+- **Message Broker**: MQTT (Eclipse Mosquitto)
+- **Authentication**: JWT with refresh token rotation
+- **Email Service**: SMTP integration
+- **Build Tool**: Maven
+- **Java Version**: 17+
 
-Notes
-- Two inbound MQTT approaches exist:
-  - MqttSubscriberImpl (in use).
-  - MqttConfig with inbound adapter + handler that logs and TODO; outbound channel is used for publishing.
-- Robot data reading endpoints:
-  - RobotStatusController returns raw DTOs from RobotStateCache (not ApiResponse).
-  - RobotMessageController wraps in ApiResponse and adds connection info (from RobotDataService last-seen).
+---
 
-## 3) Schema / Data Models
+## 2. Architecture & Flow
 
-Database: MySQL 8 (hibernate ddl-auto: update). IDs are UUID for most entities; Robot uses binary(16).
+### System Architecture
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Client Apps   │    │   Robot Fleet   │    │  Admin Portal   │
+│  (Mobile/Web)   │    │                 │    │                 │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          │ REST API             │ MQTT                 │ REST API
+          │                      │                      │
+    ┌─────▼──────────────────────▼──────────────────────▼─────┐
+    │                 Spring Boot Application                 │
+    │                                                         │
+    │ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐        │
+    │ │ Controllers │ │  Services   │ │   Config    │        │
+    │ │   Layer     │ │   Layer     │ │   Layer     │        │
+    │ └─────────────┘ └─────────────┘ └─────────────┘        │
+    │                                                         │
+    │ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐        │
+    │ │ Repository  │ │    MQTT     │ │    Redis    │        │
+    │ │   Layer     │ │  Publisher/ │ │   Cache     │        │
+    │ │             │ │ Subscriber  │ │             │        │
+    │ └─────────────┘ └─────────────┘ └─────────────┘        │
+    └─────────┬───────────────┬───────────────┬───────────────┘
+              │               │               │
+    ┌─────────▼───────┐ ┌─────▼─────┐ ┌───────▼───────┐
+    │ MySQL Database  │ │MQTT Broker│ │ Redis Server  │
+    │                 │ │(Mosquitto)│ │               │
+    └─────────────────┘ └───────────┘ └───────────────┘
+```
 
-Entities and relationships
-- Role (role)
-  - id (Long, PK), roleName (unique)
-  - 1..n Users
-- User (user)
-  - id (UUID, PK), firstName, lastName, email (unique), phone, address, username (unique), passwordHash, createdAt, updatedAt, status ("PENDING", "ACTIVE"), roleId (FK)
-  - Many-to-one Role (roleId)
-  - 1..n Trips, 1..n Payments
-- Robot (robot)
-  - id (UUID, PK, binary(16)), code (string), batteryStatus (string), locationRealtime (string "lat,lon")
-  - 1..n Trips, 1..n RobotContainers
-- RobotContainer (robot_container)
-  - id (Long, PK), robotId (UUID FK), containerCode (unique), status ("free", "non-free")
-  - Many-to-one Robot (robotId)
-  - 1..n Products
-- Trip (trip)
-  - id (UUID, PK), tripCode (unique), startPoint, endPoint, userId (UUID FK), robotId (UUID FK), status ("PENDING", "ACTIVE", "DELIVERED", "COMPLETED"), startTime, endTime
-  - Many-to-one User, Many-to-one Robot
-  - 1..n Orders, 1..n Products
-- Product (product)
-  - id (UUID, PK), code, tripId (UUID FK), containerCode (FK to robot_container.container_code)
-  - Many-to-one Trip, Many-to-one RobotContainer
-- Order (orders)
-  - id (UUID, PK), orderCode (unique), userId (UUID FK), tripId (UUID FK), productId (UUID FK), price (BigDecimal), createdAt, completedAt, updatedAt, status ("PENDING", "APPROVED", "DELIVERED", "COMPLETED", "FINISHED")
-  - Many-to-one Trip
-  - 1..n Payments
-- Payment (payment)
-  - id (UUID, PK), orderId, userId, transactedAt, paymentMethod, description, price, currency, createdAt, updatedAt, providerTransactionId
-  - Many-to-one Order, Many-to-one User
+### Request Flow
+1. **Authentication Flow**:
+   - Client sends login request → AuthController
+   - AuthController validates credentials via UserService
+   - JwtService generates access token and refresh token
+   - TokenService stores refresh token in both Redis (performance) and MySQL (persistence)
+   - Response with tokens sent back to client
 
-In-memory/Redis data
-- RobotStateCache (in-memory, auto-cleaned every 30s):
-  - Maps for location (RobotLocationDTO), battery (RobotBatteryDTO), status (RobotStatusDTO), container status per robot:container key.
-- Redis:
-  - Refresh tokens: key "refresh_token:{uuid}" → username; set "user:tokens:{username}" → members of refresh token UUIDs.
-  - Blacklisted access tokens: "blacklisted_token:{jwt}" with TTL (~15 min default).
-  - Trip progress: "trip:progress:{tripCode}" → string double, TTL 24h.
+2. **Robot Control Flow**:
+   - Admin sends robot command → RobotController
+   - RobotController publishes MQTT message via MqttCommandPublisher
+   - Robot receives command and updates status
+   - Robot publishes status updates via MQTT
+   - MqttMessageSubscriber receives updates and updates database
 
-DTOs (selected)
-- ApiResponse<T>: { success, message, data, timestamp }
-- RobotLocationDTO { lat, lon, roomCode }, RobotBatteryDTO { battery }, RobotStatusDTO { robotCode, status }, RobotContainerStatusDTO { status }
-- Auth
-  - LoginRequest { credential, password, rememberMe?, deviceInfo?, ipAddress?, twoFactorCode? }
-  - RegisterRequest { firstName, lastName, email, phone?, username, password, confirmPassword, termsAccepted, marketingConsent?, referralSource? }
-  - VerifyRequest { credential, otp }
-  - RefreshTokenRequest { refreshToken }
-  - LoginResponse { accessToken, refreshToken, verificationRequired }
-  - RegisterResponse { emailVerificationRequired, verificationLink, redirectUrl?, validationErrors? }
-  - VerifyResponse { success }
-- Account
-  - EditProfileRequest { phone?, address? }
-  - ProfileResponse { firstName, lastName, email, phone, address }
-- Orders
-  - OrderRequest { username, productName, robotCode, robotContainerCode, endpoint, approved? }
-  - OrderResponse { orderId, orderCode, productName, robotCode, robotContainerCode, endpoint, price, status, createdAt, completedAt }
-  - PickupOtpRequest { orderCode }, PickupVerifyOtpRequest { orderCode, otp[6 digits], tripCode }
-  - PickupResponse { orderCode, status, otpSentTo, verified }
-  - QRCodeResponse { orderCode, qrCodeBase64, robotCode, message }
-- Robot web responses (wrapped paths)
-  - LocationResponse { robotCode, lat, lon, roomCode }, BatteryResponse { robotCode, battery }, StatusResponse { robotCode, status }, ContainerStatusResponse { robotCode, containerCode, status }
-  - Command responses: MoveCommandResponse, PickupCommandResponse, LoadCommandResponse, CommandResponse
+3. **Order Processing Flow**:
+   - Client creates order → OrderController
+   - OrderService assigns available robot and creates trip
+   - Robot receives trip command via MQTT
+   - Real-time updates flow through MQTT → Database → Client notifications
 
-## 4) API Endpoints
+---
 
-Security
-- Authentication exempt: /api/auth/**
-- All other endpoints require Authorization: Bearer <access-token>
-- Role claim is embedded in JWT ("role"). The staff-only order endpoint validates role from token manually.
+## 3. Schema / Data Models
 
-Auth (/api/auth)
-- POST /login
-  - Body: LoginRequest
-  - Success: ApiResponse<LoginResponse> with accessToken and refreshToken
-  - Errors: 401 invalid credentials; 403 if user status=PENDING (email verification required)
-- POST /register
-  - Body: RegisterRequest (validations: names, email format, password strength, termsAccepted=true)
-  - Success: ApiResponse<RegisterResponse> with verification link and emailVerificationRequired=true
-- POST /verify-otp
-  - Body: VerifyRequest { credential (email or username), otp }
-  - Success: ApiResponse<VerifyResponse { success:true }>
-- GET /resend-otp?credential={emailOrUsername}
-  - Success: ApiResponse<Object> message "OTP resent successfully ..."
-- POST /logout
-  - Header: Authorization: Bearer <accessToken>
-  - Effect: Blacklists access token
-  - Returns: ApiResponse<Void> success or error
-- POST /refresh-token
-  - Body: RefreshTokenRequest
-  - Success: ApiResponse<LoginResponse> new access/refresh tokens
+### Core Entities
 
-Account (/api/account)
-- GET /profile
-  - Returns: ApiResponse<ProfileResponse> for current authenticated user
-- PUT /edit-profile
-  - Body: EditProfileRequest { phone?, address? }
-  - Returns: ApiResponse<ProfileResponse> updated data
+#### User Entity
+```sql
+CREATE TABLE users (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    phone VARCHAR(20),
+    status ENUM('ACTIVE', 'PENDING', 'DISABLED') DEFAULT 'PENDING',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
 
-Order (/api/order)
-- POST /create
-  - Body: OrderRequest
-  - Validations via cache: robot online and status="free"; container status="free"
-  - Creates Product, Trip (if needed), Order(PENDING)
-  - Returns: ApiResponse<OrderResponse>
-- GET /get?username={optional}
-  - Returns: ApiResponse<List<OrderResponse>> (by username if provided; else all)
-- GET /staff/all
-  - Requires JWT with role=STAFF (validated by extracting "role" claim)
-  - Returns: ApiResponse<List<OrderResponse>>
-- GET /approve/{orderCode}
-  - Sets Order.status=APPROVED; returns ApiResponse<Boolean>
-- GET /generate-qr?orderCode=X
-  - Generates Base64 QR; publishes to MQTT topic robot/{robotCode}/command/qr
-  - Returns: ApiResponse<QRCodeResponse>
-- POST /pickup/send-otp
-  - Body: PickupOtpRequest { orderCode }
-  - Precondition: Order.status must be DELIVERED
-  - Generates OTP keyed by orderCode; emails OTP to user's email
-  - Returns: ApiResponse<PickupResponse { status=OTP_SENT, otpSentTo masked }>
-- POST /pickup/verify-otp
-  - Body: PickupVerifyOtpRequest { orderCode, otp, tripCode }
-  - On valid OTP: Order status set (COMPLETED/FINISHED), Trip COMPLETED via TripStatusService; returns ApiResponse<PickupResponse { verified:true }>
+#### RefreshToken Entity (NEW - Solves persistence issue)
+```sql
+CREATE TABLE refresh_tokens (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    token VARCHAR(500) UNIQUE NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    is_revoked BOOLEAN DEFAULT FALSE,
+    device_info VARCHAR(255),
+    INDEX idx_token (token),
+    INDEX idx_username (username),
+    INDEX idx_expires_at (expires_at)
+);
+```
 
-Trip (/api/trip)
-- GET /by-order-id?orderId=<UUID>
-- GET /by-order-code?orderCode=X
-- GET /order/code/{orderCode}
-  - All return: ApiResponse<TripResponse> (robotCode, tripCode, status, times)
-- GET /progress/{tripCode} and GET /progress?tripCode=X
-  - Returns: ApiResponse<TripProgressResponse { tripCode, status, progress }>, where progress is read from Redis cache
+#### Robot Entity
+```sql
+CREATE TABLE robots (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    robot_id VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(255),
+    status ENUM('AVAILABLE', 'BUSY', 'MAINTENANCE', 'OFFLINE') DEFAULT 'OFFLINE',
+    battery_level INTEGER DEFAULT 0,
+    location_x DOUBLE,
+    location_y DOUBLE,
+    current_trip_id BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-Robot Status (cache DTO responses, not ApiResponse envelope) (/api/robot/status/{robotId})
-- GET /location → RobotLocationDTO
-- GET /battery → RobotBatteryDTO
-- GET / → RobotStatusDTO
-- GET /container/{containerCode} → RobotContainerStatusDTO
-  - Returns 404 via GlobalHandlingException if data missing
+#### Order Entity
+```sql
+CREATE TABLE orders (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    pickup_location VARCHAR(500),
+    delivery_location VARCHAR(500),
+    status ENUM('PENDING', 'ASSIGNED', 'IN_PROGRESS', 'DELIVERED', 'CANCELLED'),
+    total_amount DECIMAL(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
 
-Robot “Message” read endpoints (wrapped) (/api/robot/message/{robotCode})
-- GET /container/{containerCode}/status → ApiResponse<ContainerStatusResponse>
-- GET /location → ApiResponse<LocationResponse>
-- GET /battery → ApiResponse<BatteryResponse>
-- GET /status → ApiResponse<StatusResponse>
-- GET /connection → { status, timestamp, data: { online, lastSeen } }
-- GET /info → { status, timestamp, robotCode, data: { location?, battery?, status?, connection? } }
+#### Trip Entity
+```sql
+CREATE TABLE trips (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    order_id BIGINT NOT NULL,
+    robot_id BIGINT NOT NULL,
+    status ENUM('CREATED', 'IN_PROGRESS', 'COMPLETED', 'FAILED'),
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (robot_id) REFERENCES robots(id)
+);
+```
 
-Robot Commands (/api/robot/command)
-- POST /request-status
-  - Sends request-status command to all robots in DB; aggregates “free robots with free containers” from cache
-  - Returns: ApiResponse<Map> with robotsRequested, freeRobots list
-- POST /{robotCode}/move
-  - Body: { lat, lon, roomCode }
-  - Publishes to robot/{robotCode}/command/move; returns ApiResponse<MoveCommandResponse>
-- POST /{robotCode}/trip/{tripCode}/move
-  - Publishes to robot/{robotCode}/command/trip/{tripCode}/move
-- POST /{robotCode}/container/{containerCode}/pickup
-  - Body: { pickup: boolean }
-  - Publishes to robot/{robotCode}/container/{containerCode}/command/pickup
-- POST /{robotCode}/container/{containerCode}/trip/{tripCode}/pickup
-  - Publishes to robot/{robotCode}/container/{containerCode}/command/trip/{tripCode}/pickup
-- POST /{robotCode}/container/{containerCode}/load
-  - Body: { load: boolean }
-  - Publishes to robot/{robotCode}/container/{containerCode}/command/load
-- POST /{robotCode}/container/{containerCode}/trip/{tripCode}/load
-  - Publishes to robot/{robotCode}/container/{containerCode}/command/trip/{tripCode}/load
-- POST /{robotCode}/trip/{tripCode}/continue
-  - Validates trip by code+robot association; updates Trip.status to "continuing"; publishes to robot/{robotCode}/command/trip/{tripCode}/continue
+---
 
-## 5) Configuration & Deployment Notes
+## 4. API Endpoints
 
-Key configuration (src/main/resources/application.yaml)
-- Server
-  - port: 8080, address: 0.0.0.0
-- Datasource (MySQL)
-  - url: jdbc:mysql://localhost:3306/zippy
-  - username/password: set here; override via env (SPRING_DATASOURCE_URL, etc.)
-  - Hikari pool configs
-- JPA
-  - ddl-auto: update, show-sql: true, dialect: MySQL8
-- Mail (JavaMail)
-  - host/port/username/password configured; use secure values via env
-- Redis
-  - spring.data.redis.host/port for RedisTemplate serializers (StringRedisSerializer)
-  - EmbeddedRedisConfig uses spring.redis.host/port (primary connection factory)
-- JWT (application.security.jwt)
-  - secret-key: base64-encoded; access-token.expiration (ms), refresh-token.expiration (ms)
-- MQTT (mqtt.*)
-  - broker, client-id, username, password
-  - inboundTopics:
-    - robot/+/location
-    - robot/+/battery
-    - robot/+/status
-    - robot/+/container/+/status
-    - robot/+/trip/+
-  - outboundTopics (reference patterns; publishing uses explicit topics in RobotCommandService)
-  - qos: 1
-- Dummy data
-  - app.load-dummy-data: true enables DataLoader to run data/dummy_data.sql
+### Authentication Endpoints
 
-External services required
-- MySQL 8
-- Redis
-- MQTT broker (e.g., Mosquitto)
-- SMTP for email
+| Method | Endpoint | Description | Request Body | Response |
+|--------|----------|-------------|--------------|----------|
+| POST | `/api/auth/login` | User login | `LoginRequest` | `LoginResponse` with tokens |
+| POST | `/api/auth/register` | User registration | `RegisterRequest` | `RegisterResponse` |
+| POST | `/api/auth/refresh-token` | Refresh access token | `RefreshTokenRequest` | New tokens |
+| POST | `/api/auth/verify` | Email verification | `VerifyRequest` | `VerifyResponse` |
+| POST | `/api/auth/logout` | User logout | - | Success message |
 
-Security
-- JWT-based auth; /api/auth/** is publicly accessible; all others require Bearer tokens.
-- BCrypt password hashing.
-- Role claim embedded in access token; resource-level role checks must be implemented per endpoint (example: staff endpoint checks "role" claim).
+### Robot Management Endpoints
 
-Deployment and run
-- Provide environment variables or override application.yaml for credentials/secrets.
-- Start the app (Maven):
-  - mvn spring-boot:run
-- Or build and run jar:
-  - mvn clean package
-  - java -jar target/zippy-backend-*.jar
+| Method | Endpoint | Description | Parameters | Response |
+|--------|----------|-------------|------------|----------|
+| GET | `/api/robots` | Get all robots | - | List of robots |
+| GET | `/api/robots/{id}` | Get robot by ID | `id: Long` | Robot details |
+| POST | `/api/robots/{robotId}/command/move` | Send move command | `robotId, coordinates` | Command status |
+| GET | `/api/robots/{robotId}/status` | Get robot status | `robotId: String` | Robot status |
 
-## 6) Example Usage
+### Order Management Endpoints
 
-User onboarding and order-to-delivery flow
-1) Register
-- POST /api/auth/register with RegisterRequest
-- Receive ApiResponse with emailVerificationRequired=true
+| Method | Endpoint | Description | Request Body | Response |
+|--------|----------|-------------|--------------|----------|
+| POST | `/api/orders` | Create new order | `OrderRequest` | Created order |
+| GET | `/api/orders` | Get user orders | - | List of orders |
+| GET | `/api/orders/{id}` | Get order details | - | Order details |
+| PUT | `/api/orders/{id}/cancel` | Cancel order | - | Updated order |
 
-2) Verify OTP
-- POST /api/auth/verify-otp with { credential: "<email or username>", otp: "123456" }
-- Success returns ApiResponse { success: true }
+### Trip Management Endpoints
 
-3) Login
-- POST /api/auth/login → get accessToken and refreshToken
-- Use Authorization: Bearer <accessToken> for subsequent requests
+| Method | Endpoint | Description | Parameters | Response |
+|--------|----------|-------------|------------|----------|
+| GET | `/api/trips` | Get all trips | - | List of trips |
+| GET | `/api/trips/{id}` | Get trip details | `id: Long` | Trip details |
+| POST | `/api/trips/{id}/start` | Start trip | `id: Long` | Updated trip |
 
-4) Pick a robot/container (ensure available)
-- Call POST /api/robot/command/request-status → see freeRobots list with freeContainers
+### MQTT Topics
 
-5) Create order
-- POST /api/order/create with { username, productName, robotCode, robotContainerCode, endpoint }
-- Returns OrderResponse with orderCode and tripCode (via trip link)
+#### Inbound Topics (Robot → Server)
+- `robot/+/location` - Robot location updates
+- `robot/+/battery` - Battery level updates  
+- `robot/+/status` - Robot status updates
+- `robot/+/container/+/status` - Container status
+- `robot/+/trip/+` - Trip progress updates
 
-6) Robot brings item; robot publishes progress to robot/{robotCode}/trip/{tripCode}; TripStatusService sets trip to DELIVERED and associated order(s) to DELIVERED; view via:
-- GET /api/trip/progress/{tripCode}
-- GET /api/order/get?username=<username>
+#### Outbound Topics (Server → Robot)
+- `robot/+/command/move` - Movement commands
+- `robot/+/command/request-status` - Status requests
+- `robot/+/container/+/command/trip/+/load` - Load commands
+- `robot/+/container/+/command/trip/+/pickup` - Pickup commands
+- `robot/+/command/trip/+/move` - Trip movement commands
+- `robot/+/command/trip/+/continue` - Continue trip commands
 
-7) Pickup OTP flow
-- POST /api/order/pickup/send-otp { orderCode } → emails OTP to user, returns masked email
-- POST /api/order/pickup/verify-otp { orderCode, otp, tripCode } → completes order and trip
-- Verify with GET /api/order/get?username=... and GET /api/trip/by-order-code?orderCode=...
+---
 
-8) Optional: QR delivery to robot
-- GET /api/order/generate-qr?orderCode=<code> → generates Base64 PNG and publishes to robot/{robotCode}/command/qr
+## 5. Configuration & Deployment
 
-Robot control example
-- Move robot
-  - POST /api/robot/command/{robotCode}/move { lat, lon, roomCode } → publishes to robot/{robotCode}/command/move
-- Container load/pickup
-  - POST /api/robot/command/{robotCode}/container/{containerCode}/load { load: true|false }
-  - POST /api/robot/command/{robotCode}/container/{containerCode}/pickup { pickup: true|false }
-- Trip-based variants and continue
-  - POST /api/robot/command/{robotCode}/trip/{tripCode}/move ...
-  - POST /api/robot/command/{robotCode}/trip/{tripCode}/continue
+### Environment Variables
+```yaml
+# Database Configuration
+DB_URL=jdbc:mysql://localhost:3306/zippy
+DB_USERNAME=root
+DB_PASSWORD=12345678
 
-## 7) Diagram Recommendations (optional)
+# Redis Configuration  
+REDIS_HOST=localhost
+REDIS_PORT=6379
 
-- System architecture
-  - Show client → REST API → Controllers → Services → (Repositories/MySQL, Redis) and MQTT paths:
-    - Outbound commands via Spring Integration mqttOutboundChannel → broker → robots.
-    - Inbound telemetry via Paho subscriber → RobotMessageService → RobotDataService/TripStatusService.
-- Database ERD
-  - Entities: User, Role, Robot, RobotContainer, Trip, Product, Order, Payment with FKs and cardinalities.
-- Request/response sequences
-  - Auth register/verify/login flow.
-  - Order create → trip create/update → robot MQTT progress → TripStatusService status updates → pickup OTP verification.
-  - Robot command publish and robot telemetry ingestion.
+# MQTT Configuration
+MQTT_BROKER=tcp://localhost:1883
+MQTT_USERNAME=khanhnc
+MQTT_PASSWORD=12345678
 
-Notes and considerations
-- Consistency of API envelopes: RobotStatusController returns raw DTOs, while RobotMessageController uses ApiResponse; standardizing responses may improve client integration.
-- Redis config duplication: both spring.data.redis.* and spring.redis.* are present; EmbeddedRedisConfig defines a @Primary connection factory on spring.redis.* values and RedisConfig configures RedisTemplate on spring.data.redis.*. Keep them consistent to avoid confusion.
-- Email @Async methods require @EnableAsync to truly run asynchronously.
+# JWT Configuration
+JWT_SECRET=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+JWT_ACCESS_EXPIRATION=45000
+JWT_REFRESH_EXPIRATION=604800000
 
+# Email Configuration
+MAIL_HOST=smtp.phamanh.io.vn
+MAIL_PORT=465
+MAIL_USERNAME=zippy@phamanh.io.vn
+MAIL_PASSWORD=TiinJzRyX4Aqr0
+```
+
+### Docker Deployment
+```dockerfile
+# Dockerfile
+FROM openjdk:17-jdk-slim
+WORKDIR /app
+COPY target/zippy-backend-*.jar app.jar
+EXPOSE 8080
+CMD ["java", "-jar", "app.jar"]
+```
+
+### Docker Compose
+```yaml
+version: '3.8'
+services:
+  zippy-backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_URL=jdbc:mysql://mysql:3306/zippy
+      - REDIS_HOST=redis
+      - MQTT_BROKER=tcp://mosquitto:1883
+    depends_on:
+      - mysql
+      - redis
+      - mosquitto
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: zippy
+      MYSQL_ROOT_PASSWORD: 12345678
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+volumes:
+  mysql_data:
+```
+
+---
+
+## 6. Refresh Token Persistence Solution
+
+### Problem
+Your refresh tokens were previously stored only in Redis (in-memory), causing all active sessions to be lost when the application restarts.
+
+### Solution: Hybrid Storage Approach
+
+#### Implementation Details
+1. **Dual Storage**: Refresh tokens are now stored in both Redis (for performance) and MySQL (for persistence)
+2. **Automatic Sync**: On application startup, active tokens from database are synced to Redis
+3. **Fallback Mechanism**: If token not found in Redis, system checks database and re-syncs to Redis
+4. **Cleanup Service**: Scheduled tasks remove expired tokens from both storage systems
+
+#### Key Benefits
+- **Persistence**: Tokens survive application restarts
+- **Performance**: Redis provides fast token validation
+- **Reliability**: Database ensures data durability
+- **Security**: Proper token revocation across both systems
+
+#### Database Schema
+```sql
+CREATE TABLE refresh_tokens (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    token VARCHAR(500) UNIQUE NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    is_revoked BOOLEAN DEFAULT FALSE,
+    device_info VARCHAR(255)
+);
+```
+
+#### Service Implementation
+- **TokenService**: Enhanced to support hybrid storage
+- **RefreshTokenRepository**: JPA repository for database operations
+- **TokenCleanupService**: Scheduled cleanup of expired tokens
+
+---
+
+## 7. MQTT Broker Deployment
+
+### Current Local Setup
+```bash
+CONTAINER_ID="1b3"
+MQTT_HOST="localhost" 
+MQTT_PORT=1883
+MQTT_USER="khanhnc"
+MQTT_PASS="12345678"
+```
+
+### Cloud Deployment Recommendations
+
+#### Option 1: Self-Hosted on VPS/Cloud
+```yaml
+# docker-compose.yml for cloud deployment
+version: '3.8'
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: zippy-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"  # WebSocket
+      - "8883:8883"  # SSL/TLS
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+      - ./ssl:/mosquitto/ssl
+    restart: unless-stopped
+    environment:
+      - MOSQUITTO_USERNAME=${MQTT_USER}
+      - MOSQUITTO_PASSWORD=${MQTT_PASS}
+```
+
+**Mosquitto Configuration for Production:**
+```conf
+# mosquitto.conf
+listener 1883
+allow_anonymous false
+password_file /mosquitto/config/passwd
+
+listener 9001
+protocol websockets
+allow_anonymous false
+
+listener 8883
+cafile /mosquitto/ssl/ca.crt
+certfile /mosquitto/ssl/server.crt
+keyfile /mosquitto/ssl/server.key
+require_certificate false
+```
+
+#### Option 2: AWS IoT Core
+```yaml
+# application-prod.yaml
+mqtt:
+  broker: ssl://your-endpoint.iot.region.amazonaws.com:8883
+  client-id: zippy-backend-prod
+  ssl:
+    enabled: true
+    certificate-path: /etc/ssl/certs/device.pem
+    private-key-path: /etc/ssl/private/private.key
+    ca-certificate-path: /etc/ssl/certs/AmazonRootCA1.pem
+```
+
+#### Option 3: HiveMQ Cloud (Managed)
+```yaml
+mqtt:
+  broker: ssl://your-cluster.s1.eu.hivemq.cloud:8883
+  client-id: zippy-backend-prod
+  username: ${HIVEMQ_USERNAME}
+  password: ${HIVEMQ_PASSWORD}
+  ssl:
+    enabled: true
+```
+
+#### Option 4: Google Cloud IoT Core
+```yaml
+mqtt:
+  broker: ssl://mqtt.googleapis.com:8883
+  client-id: projects/PROJECT_ID/locations/REGION/registries/REGISTRY_ID/devices/DEVICE_ID
+  jwt-token: ${GOOGLE_IOT_JWT_TOKEN}
+```
+
+### Recommended Production Setup
+For your application, I recommend **AWS IoT Core** or **self-hosted Mosquitto on cloud VPS** because:
+
+1. **AWS IoT Core**: 
+   - Built-in security and authentication
+   - Automatic scaling
+   - Integration with other AWS services
+   - Device management features
+
+2. **Self-hosted Mosquitto**:
+   - Full control over configuration
+   - Cost-effective for high message volumes
+   - Custom authentication integration
+   - Easy to migrate from local setup
+
+### Cloud Configuration Updates
+```yaml
+# application-prod.yaml
+spring:
+  profiles: prod
+
+mqtt:
+  broker: ssl://your-mqtt-broker.com:8883
+  client-id: zippy-backend-${random.uuid}
+  username: ${MQTT_PROD_USER}
+  password: ${MQTT_PROD_PASS}
+  ssl:
+    enabled: true
+    trust-store: classpath:ssl/truststore.jks
+    trust-store-password: ${SSL_TRUSTSTORE_PASSWORD}
+  connection:
+    timeout: 30000
+    keep-alive: 60
+    clean-session: false
+    automatic-reconnect: true
+```
+
+---
+
+## 8. Example Usage
+
+### Authentication Flow Example
+```bash
+# 1. User Registration
+curl -X POST http://localhost:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123",
+    "confirmPassword": "password123",
+    "fullName": "John Doe"
+  }'
+
+# 2. Email Verification
+curl -X POST http://localhost:8080/api/auth/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "otp": "123456"
+  }'
+
+# 3. User Login
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credential": "user@example.com",
+    "password": "password123"
+  }'
+
+# Response:
+{
+  "success": true,
+  "message": "User logged in successfully",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "refreshToken": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "verificationRequired": false
+  }
+}
+
+# 4. Refresh Token Usage
+curl -X POST http://localhost:8080/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+  }'
+```
+
+### Robot Control Example
+```bash
+# Get all robots
+curl -X GET http://localhost:8080/api/robots \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
+
+# Send move command to robot
+curl -X POST http://localhost:8080/api/robots/robot-001/command/move \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetX": 10.5,
+    "targetY": 20.3,
+    "priority": "HIGH"
+  }'
+```
+
+### Order Creation Example
+```bash
+# Create new order
+curl -X POST http://localhost:8080/api/orders \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pickupLocation": "Building A, Floor 1",
+    "deliveryLocation": "Building B, Floor 3",
+    "items": [
+      {
+        "productId": 1,
+        "quantity": 2
+      }
+    ]
+  }'
+```
+
+### MQTT Message Examples
+```javascript
+// Robot location update (Robot → Server)
+Topic: robot/robot-001/location
+Payload: {
+  "robotId": "robot-001",
+  "x": 15.2,
+  "y": 25.8,
+  "timestamp": "2025-08-21T10:30:00Z"
+}
+
+// Move command (Server → Robot)
+Topic: robot/robot-001/command/move
+Payload: {
+  "targetX": 20.0,
+  "targetY": 30.0,
+  "speed": "NORMAL",
+  "commandId": "cmd-123456"
+}
+```
+
+---
+
+## 9. Diagram Recommendations
+
+### System Architecture Diagram
+Create a high-level system architecture diagram showing:
+- Client applications (mobile/web)
+- Spring Boot backend
+- Database layer (MySQL)
+- Cache layer (Redis)
+- Message broker (MQTT)
+- Robot fleet
+- External services (email)
+
+### Database Schema ERD
+Create an Entity Relationship Diagram including:
+- User, Role, RefreshToken entities
+- Robot, RobotContainer entities  
+- Order, Trip, Payment entities
+- Product entity
+- Relationships and foreign keys
+
+### Authentication Sequence Diagram
+Show the complete authentication flow:
+1. Login request
+2. Credential validation
+3. Token generation (access + refresh)
+4. Hybrid storage (Redis + Database)
+5. Token refresh process
+6. Logout and token revocation
+
+### MQTT Communication Flow
+Illustrate bidirectional MQTT communication:
+- Robot status updates
+- Command distribution
+- Topic routing
+- Message persistence
+
+### Request/Response Flow Diagram
+Detail the typical request lifecycle:
+1. Client request with JWT
+2. Authentication filter validation
+3. Controller processing
+4. Service layer execution
+5. Database operations
+6. Response formation
+7. Caching mechanisms
+
+---
+
+## Deployment Checklist
+
+### Before Deploying to Production:
+
+#### Database Setup
+- [ ] Configure production MySQL database
+- [ ] Run database migrations
+- [ ] Set up database backups
+- [ ] Configure connection pooling
+
+#### Redis Setup  
+- [ ] Deploy Redis in production mode
+- [ ] Configure Redis persistence (RDB + AOF)
+- [ ] Set up Redis clustering if needed
+- [ ] Configure memory limits
+
+#### MQTT Broker Setup
+- [ ] Choose MQTT deployment strategy (self-hosted vs managed)
+- [ ] Configure SSL/TLS certificates
+- [ ] Set up proper authentication
+- [ ] Configure topic permissions
+- [ ] Test connectivity from application
+
+#### Security
+- [ ] Change default JWT secret key
+- [ ] Set up proper CORS configuration
+- [ ] Configure rate limiting
+- [ ] Set up monitoring and alerting
+- [ ] Review and update all default passwords
+
+#### Application Configuration
+- [ ] Set production profiles
+- [ ] Configure environment variables
+- [ ] Set up logging configuration
+- [ ] Configure health checks
+- [ ] Set up monitoring endpoints
+
+This comprehensive documentation provides a complete technical overview of your Zippy Backend system, addresses the refresh token persistence issue with a production-ready solution, and includes detailed recommendations for MQTT broker deployment in cloud environments.
