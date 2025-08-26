@@ -73,5 +73,11 @@ mqtt:
       - robot/+/command/qr-code
     qos: 1
 
+payos:
+  client-id: 3ffbee14-99b5-4f3d-b3b1-8bbae79e2bbb
+  api_key: e374d39a-92bb-44f6-b0ad-341c76eefcb1
+  checksum-key: 5a7917b6ef2febca81e2eabcfce362bf70a6880d66aa76be0ee69f761cd836fb
+  base-url: https://api-merchant.payos.vn
+
 app:
   load-dummy-data: true

@@ -168,6 +168,13 @@
 			<version>1.2.5</version>
 		</dependency>
 
+		<!-- PayOS Integration -->
+		<dependency>
+			<groupId>vn.payos</groupId>
+			<artifactId>payos-java</artifactId>
+			<version>1.0.3</version>
+		</dependency>
+
 		<dependency>
 			<groupId>com.google.zxing</groupId>
 			<artifactId>core</artifactId>
