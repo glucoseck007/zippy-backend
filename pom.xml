@@ -101,66 +101,12 @@
 			<optional>true</optional>
 		</dependency>
 
-		<!-- MQTT Client -->
-		<dependency>
-			<groupId>org.eclipse.paho</groupId>
-			<artifactId>org.eclipse.paho.client.mqttv3</artifactId>
-			<version>1.2.5</version>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<!-- Redis dependency -->
+		<!-- Spring Data Redis -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-redis</artifactId>
 		</dependency>
 
-		<!-- Redis Connection Pooling -->
-		<dependency>
-			<groupId>org.apache.commons</groupId>
-			<artifactId>commons-pool2</artifactId>
-		</dependency>
-
-		<!-- Embedded Redis for development -->
-		<dependency>
-			<groupId>it.ozimov</groupId>
-			<artifactId>embedded-redis</artifactId>
-			<version>0.7.3</version>
-			<exclusions>
-				<exclusion>
-					<groupId>org.slf4j</groupId>
-					<artifactId>slf4j-simple</artifactId>
-				</exclusion>
-			</exclusions>
-		</dependency>
-
-		<!-- Spring Integration MQTT -->
-		<dependency>
-			<groupId>org.springframework.integration</groupId>
-			<artifactId>spring-integration-mqtt</artifactId>
-		</dependency>
-
-		<!-- Eclipse Paho MQTT Client -->
-		<dependency>
-			<groupId>org.eclipse.paho</groupId>
-			<artifactId>org.eclipse.paho.client.mqttv3</artifactId>
-			<version>1.2.5</version>
-		</dependency>        <!-- Spring Integration MQTT -->
-		<dependency>
-			<groupId>org.springframework.integration</groupId>
-			<artifactId>spring-integration-mqtt</artifactId>
-		</dependency>
-
 		<!-- Eclipse Paho MQTT Client -->
 		<dependency>
 			<groupId>org.eclipse.paho</groupId>
@@ -168,11 +114,21 @@
 			<version>1.2.5</version>
 		</dependency>
 
-		<!-- PayOS Integration -->
+		<!-- Spring Integration for MQTT -->
+		<dependency>
+			<groupId>org.springframework.integration</groupId>
+			<artifactId>spring-integration-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.integration</groupId>
+			<artifactId>spring-integration-mqtt</artifactId>
+		</dependency>
+
+		<!-- PayOS SDK -->
 		<dependency>
 			<groupId>vn.payos</groupId>
 			<artifactId>payos-java</artifactId>
-			<version>1.0.3</version>
+			<version>1.0.1</version>
 		</dependency>
 
 		<dependency>

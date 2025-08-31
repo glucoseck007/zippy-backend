@@ -26,28 +26,22 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
 
     private MqttClient mqttClient;
 
-    // Regex patterns for topic matching
-    private static final Pattern CONTAINER_STATUS_PATTERN =
-            Pattern.compile("robot/([^/]+)/container/([^/]+)/status");
-    private static final Pattern LOCATION_PATTERN =
-            Pattern.compile("robot/([^/]+)/location");
-    private static final Pattern BATTERY_PATTERN =
-            Pattern.compile("robot/([^/]+)/battery");
-    private static final Pattern STATUS_PATTERN =
-            Pattern.compile("robot/([^/]+)/status");
-    private static final Pattern TRIP_STATUS_PATTERN =
-            Pattern.compile("robot/([^/]+)/trip/([^/]+)");
-    private static final Pattern TRIP_START_POINT_PATTERN =
-            Pattern.compile("robot/([^/]+)/trip/([^/]+)/start_point");
-    private static final Pattern TRIP_END_POINT_PATTERN =
-            Pattern.compile("robot/([^/]+)/trip/([^/]+)/end_point");
+    // Regex patterns for topic matching based on new topic structure
+    private static final Pattern LOCATION_PATTERN = Pattern.compile("robot/([^/]+)/location");
+    private static final Pattern BATTERY_PATTERN = Pattern.compile("robot/([^/]+)/battery");
+    private static final Pattern STATUS_PATTERN = Pattern.compile("robot/([^/]+)/status");
+    private static final Pattern CONTAINER_PATTERN = Pattern.compile("robot/([^/]+)/container");
+    private static final Pattern TRIP_PATTERN = Pattern.compile("robot/([^/]+)/trip");
+    private static final Pattern QR_CODE_PATTERN = Pattern.compile("robot/([^/]+)/qr-code");
+    private static final Pattern FORCE_MOVE_PATTERN = Pattern.compile("robot/([^/]+)/force_move");
+    private static final Pattern WARNING_PATTERN = Pattern.compile("robot/([^/]+)/warning");
 
     public MqttSubscriberImpl(
             RobotMessageService robotMessageService,
             MqttProperties mqttProperties) {
         this.robotMessageService = robotMessageService;
         this.brokerUrl = mqttProperties.getBroker();
-        this.clientId = mqttProperties.getClientId() + "-sub";
+        this.clientId = mqttProperties.getClientId() + "-subscriber";
         this.username = mqttProperties.getUsername();
         this.password = mqttProperties.getPassword();
     }
@@ -64,7 +58,7 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
                 options.setPassword(password.toCharArray());
             }
 
-            // Optional: resilience
+            // Connection resilience settings
             options.setKeepAliveInterval(30);
             options.setConnectionTimeout(60);
             options.setAutomaticReconnect(true);
@@ -91,7 +85,7 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             });
 
             connect();
-            subscribeToRobotTopics();
+            subscribeToInboundTopics();
 
         } catch (MqttException e) {
             log.error("Failed to initialize MQTT subscriber", e);
@@ -110,7 +104,7 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
                 }
 
                 mqttClient.connect(options);
-                log.info("Connected to MQTT broker");
+                log.info("Connected to MQTT broker at {}", brokerUrl);
             }
         } catch (MqttException e) {
             log.error("Failed to connect to MQTT broker", e);
@@ -122,31 +116,39 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             Thread.sleep(5000); // Wait before reconnecting
             connect();
             if (mqttClient.isConnected()) {
-                subscribeToRobotTopics();
+                subscribeToInboundTopics();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
     }
 
-    private void subscribeToRobotTopics() {
+    /**
+     * Subscribe to all inbound topics for robot communication
+     * Based on the topic structure: robot/+/[location|battery|status|container|trip|qr-code|force_move|warning]
+     */
+    private void subscribeToInboundTopics() {
         try {
-            // Subscribe to all robot topics using wildcards
-            subscribe("robot/+/container/+/status");
+            // Subscribe to all inbound topics using wildcards
             subscribe("robot/+/location");
             subscribe("robot/+/battery");
             subscribe("robot/+/status");
-            subscribe("robot/+/trip/+");
-            log.info("Subscribed to robot topics");
+            subscribe("robot/+/container");
+            subscribe("robot/+/trip");
+            subscribe("robot/+/qr-code");
+            subscribe("robot/+/force_move");
+            subscribe("robot/+/warning");
+
+            log.info("Successfully subscribed to all inbound robot topics");
         } catch (Exception e) {
-            log.error("Failed to subscribe to robot topics", e);
+            log.error("Failed to subscribe to inbound robot topics", e);
         }
     }
 
     @Override
     public void subscribe(String topic) {
         try {
-            mqttClient.subscribe(topic);
+            mqttClient.subscribe(topic, 1); // QoS 1 for reliable delivery
             log.debug("Subscribed to topic: {}", topic);
         } catch (MqttException e) {
             log.error("Failed to subscribe to topic: {}", topic, e);
@@ -163,62 +165,73 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
         }
     }
 
+    /**
+     * Process incoming MQTT messages and route them to appropriate handlers
+     * based on the new topic structure and payload formats
+     */
     private void processMessage(String topic, String payload) {
-        // Match topic with appropriate pattern and route to correct handler
-        Matcher containerStatusMatcher = CONTAINER_STATUS_PATTERN.matcher(topic);
-        if (containerStatusMatcher.matches()) {
-            String robotId = containerStatusMatcher.group(1);
-            String containerCode = containerStatusMatcher.group(2);
-            robotMessageService.handleContainerStatus(robotId, containerCode, payload);
-            return;
+        try {
+            // Match topic with appropriate pattern and route to correct handler
+            Matcher locationMatcher = LOCATION_PATTERN.matcher(topic);
+            if (locationMatcher.matches()) {
+                String robotCode = locationMatcher.group(1);
+                robotMessageService.handleLocationMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher batteryMatcher = BATTERY_PATTERN.matcher(topic);
+            if (batteryMatcher.matches()) {
+                String robotCode = batteryMatcher.group(1);
+                robotMessageService.handleBatteryMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher statusMatcher = STATUS_PATTERN.matcher(topic);
+            if (statusMatcher.matches()) {
+                String robotCode = statusMatcher.group(1);
+                robotMessageService.handleStatusMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher containerMatcher = CONTAINER_PATTERN.matcher(topic);
+            if (containerMatcher.matches()) {
+                String robotCode = containerMatcher.group(1);
+                robotMessageService.handleContainerMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher tripMatcher = TRIP_PATTERN.matcher(topic);
+            if (tripMatcher.matches()) {
+                String robotCode = tripMatcher.group(1);
+                robotMessageService.handleTripMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher qrCodeMatcher = QR_CODE_PATTERN.matcher(topic);
+            if (qrCodeMatcher.matches()) {
+                String robotCode = qrCodeMatcher.group(1);
+                robotMessageService.handleQrCodeMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher forceMoveMapping = FORCE_MOVE_PATTERN.matcher(topic);
+            if (forceMoveMapping.matches()) {
+                String robotCode = forceMoveMapping.group(1);
+                robotMessageService.handleForceMoveMessage(robotCode, payload);
+                return;
+            }
+
+            Matcher warningMatcher = WARNING_PATTERN.matcher(topic);
+            if (warningMatcher.matches()) {
+                String robotCode = warningMatcher.group(1);
+                robotMessageService.handleWarningMessage(robotCode, payload);
+                return;
+            }
+
+            log.warn("Received message on unhandled topic: {} with payload: {}", topic, payload);
+        } catch (Exception e) {
+            log.error("Error processing message from topic {}: {}", topic, e.getMessage(), e);
         }
-
-        Matcher locationMatcher = LOCATION_PATTERN.matcher(topic);
-        if (locationMatcher.matches()) {
-            String robotId = locationMatcher.group(1);
-            robotMessageService.handleLocation(robotId, payload);
-            return;
-        }
-
-        Matcher batteryMatcher = BATTERY_PATTERN.matcher(topic);
-        if (batteryMatcher.matches()) {
-            String robotId = batteryMatcher.group(1);
-            robotMessageService.handleBattery(robotId, payload);
-            return;
-        }
-
-        Matcher statusMatcher = STATUS_PATTERN.matcher(topic);
-        if (statusMatcher.matches()) {
-            String robotId = statusMatcher.group(1);
-            robotMessageService.handleStatus(robotId, payload);
-            return;
-        }
-
-        Matcher tripStatusMatcher = TRIP_STATUS_PATTERN.matcher(topic);
-        if (tripStatusMatcher.matches()) {
-            String robotId = tripStatusMatcher.group(1);
-            String tripId = tripStatusMatcher.group(2);
-            robotMessageService.handleTripStatus(robotId, tripId, payload);
-            return;
-        }
-
-//        Matcher tripStartPointMatcher = TRIP_START_POINT_PATTERN.matcher(topic);
-//        if (tripStartPointMatcher.matches()) {
-//            String robotId = tripStartPointMatcher.group(1);
-//            String tripId = tripStartPointMatcher.group(2);
-//            robotMessageService.handleTripStartPoint(robotId, tripId, payload);
-//            return;
-//        }
-//
-//        Matcher tripEndPointMatcher = TRIP_END_POINT_PATTERN.matcher(topic);
-//        if (tripEndPointMatcher.matches()) {
-//            String robotId = tripEndPointMatcher.group(1);
-//            String tripId = tripEndPointMatcher.group(2);
-//            robotMessageService.handleTripEndPoint(robotId, tripId, payload);
-//            return;
-//        }
-
-        log.warn("Received message on unhandled topic: {}", topic);
     }
 
     @PreDestroy
@@ -227,9 +240,11 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             if (mqttClient != null && mqttClient.isConnected()) {
                 mqttClient.disconnect();
                 mqttClient.close();
+                log.info("MQTT subscriber disconnected and closed");
             }
         } catch (MqttException e) {
             log.error("Error during MQTT client shutdown", e);
         }
     }
 }
+

@@ -56,22 +56,38 @@ public class RobotService {
     }
 
     /**
-     * Get robots by battery status
+     * Get robots by battery level threshold
      *
-     * @param batteryStatus Battery status
-     * @return List of robots with specified battery status
+     * @param batteryThreshold Battery level threshold (0.0 to 100.0)
+     * @param isLowBattery true to get robots below threshold, false to get robots above threshold
+     * @return List of robots matching battery criteria
      */
     @Transactional(readOnly = true)
-    public List<RobotDTO> getRobotsByBatteryStatus(String batteryStatus) {
-        log.info("Fetching robots with battery status: {}", batteryStatus);
+    public List<RobotDTO> getRobotsByBatteryLevel(double batteryThreshold, boolean isLowBattery) {
+        log.info("Fetching robots with battery {} threshold: {}",
+                isLowBattery ? "below" : "above", batteryThreshold);
 
-        List<Robot> robots = robotRepository.findByBatteryStatus(batteryStatus);
-        List<RobotDTO> robotDTOs = robots.stream()
+        List<Robot> allRobots = (List<Robot>) robotRepository.findAll();
+        List<RobotDTO> filteredRobots = allRobots.stream()
+                .filter(robot -> isLowBattery ?
+                    robot.getBatteryStatus() < batteryThreshold :
+                    robot.getBatteryStatus() >= batteryThreshold)
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
 
-        log.info("Found {} robots with battery status: {}", robotDTOs.size(), batteryStatus);
-        return robotDTOs;
+        log.info("Found {} robots with battery {} threshold: {}",
+                filteredRobots.size(), isLowBattery ? "below" : "above", batteryThreshold);
+        return filteredRobots;
+    }
+
+    /**
+     * Get robots with low battery (below 20%)
+     *
+     * @return List of robots with low battery
+     */
+    @Transactional(readOnly = true)
+    public List<RobotDTO> getLowBatteryRobots() {
+        return getRobotsByBatteryLevel(20.0, true);
     }
 
     /**
@@ -157,8 +173,8 @@ public class RobotService {
      * @return Status string
      */
     private String determineRobotStatus(Robot robot, int activeTripsCount) {
-        // If battery is low, mark as maintenance needed
-        if ("LOW".equalsIgnoreCase(robot.getBatteryStatus())) {
+        // If battery is low (below 20%), mark as maintenance needed
+        if (robot.getBatteryStatus() < 20.0) {
             return "MAINTENANCE";
         }
 

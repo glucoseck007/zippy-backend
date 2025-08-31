@@ -93,7 +93,7 @@ public class OrderService {
                 .tripId(trip.getId())
                 .productId(savedProduct.getId()) // Use the auto-generated product ID
                 .price(BigDecimal.ZERO) // Default price, can be calculated based on business logic
-                .status("PENDING")
+                .status("ACTIVE")
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -382,6 +382,23 @@ public class OrderService {
         return orders.stream()
                 .map(this::convertToOrderResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Get order by order code
+     * @param orderCode Order code to search for
+     * @return OrderResponse containing order details including price
+     */
+    public OrderResponse getOrderByOrderCode(String orderCode) {
+        log.info("Retrieving order by order code: {}", orderCode);
+
+        Optional<Order> orderOpt = orderRepository.findByOrderCode(orderCode);
+        if (orderOpt.isEmpty()) {
+            throw new RuntimeException("Order not found with code: " + orderCode);
+        }
+
+        Order order = orderOpt.get();
+        return convertToOrderResponse(order);
     }
 
     private OrderResponse convertToOrderResponse(Order order) {

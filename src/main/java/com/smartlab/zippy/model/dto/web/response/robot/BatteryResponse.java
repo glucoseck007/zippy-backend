@@ -11,5 +11,5 @@ import lombok.*;
 public class BatteryResponse {
 
     private String robotCode;
-    private String battery;
+    private double battery; // Changed from String to double to match the new battery system
 }

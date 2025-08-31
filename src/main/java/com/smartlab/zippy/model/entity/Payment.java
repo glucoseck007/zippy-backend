@@ -19,7 +19,10 @@ public class Payment {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-    
+
+    @Column(name = "payment_code", unique = true)
+    private Long paymentCode;
+
     @Column(name = "order_id")
     private UUID orderId;
     
@@ -47,6 +50,9 @@ public class Payment {
     @Column(name = "provider_transaction_id")
     private String providerTransactionId;
     
+    @Column(name = "status")
+    private String status;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", insertable = false, updatable = false)
     private Order order;

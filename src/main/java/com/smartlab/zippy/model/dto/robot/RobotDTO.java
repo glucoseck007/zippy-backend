@@ -14,7 +14,7 @@ import java.util.UUID;
 public class RobotDTO {
     private UUID id;
     private String code;
-    private String batteryStatus;
+    private double batteryStatus;
     private String locationRealtime;
     private String status; // Available, Busy, Maintenance, Offline, etc.
     private int containerCount;

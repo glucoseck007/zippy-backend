@@ -53,30 +53,34 @@ application:
       refresh-token:
         expiration: 604800000
 mqtt:
-    broker: tcp://localhost:1883
+    broker: tcp://36.50.135.207:1883
     client-id: mqtt-listener-service
-    username: khanhnc
-    password: 12345678
+    username: admin
+    password: 123@123
     inboundTopics:
       - robot/+/location
       - robot/+/battery
       - robot/+/status
-      - robot/+/container/+/status
-      - robot/+/trip/+
+      - robot/+/container
+      - robot/+/trip
+      - robot/+/qr-code
+      - robot/+/force_move
+      - robot/+/warning
     outboundTopics:
-      - robot/+/command/move
-      - robot/+/command/request-status
-      - robot/+/container/+/command/trip/+/load
-      - robot/+/container/+/command/trip/+/pickup
-      - robot/+/command/trip/+/move
-      - robot/+/command/trip/+/continue
-      - robot/+/command/qr-code
+      - robot/+/location
+      - robot/+/battery
+      - robot/+/status
+      - robot/+/container
+      - robot/+/trip
+      - robot/+/qr-code
+      - robot/+/force_move
+      - robot/+/warning
     qos: 1
 
 payos:
-  client-id: 3ffbee14-99b5-4f3d-b3b1-8bbae79e2bbb
-  api_key: e374d39a-92bb-44f6-b0ad-341c76eefcb1
-  checksum-key: 5a7917b6ef2febca81e2eabcfce362bf70a6880d66aa76be0ee69f761cd836fb
+  client-id: f593e1fc-a176-4253-bff0-becea0fe497f
+  api-key: d0330c25-c5d5-43ff-b4a8-df1c6d0d04f2
+  checksum-key: 4998051de342cd0e2f5fee3d4b0ab103e2ae8b24b7a271b045d980bc224dd81c
   base-url: https://api-merchant.payos.vn
 
 app:

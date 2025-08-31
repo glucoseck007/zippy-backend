@@ -89,6 +89,40 @@ public class RobotDataService {
     }
 
     /**
+     * Update all container statuses for a robot with cache-first and database persistence
+     * This method is used when the MQTT message doesn't specify individual container codes
+     */
+    @Transactional
+    public void updateAllContainerStatuses(String robotId, RobotContainerStatusDTO status) {
+        try {
+            // Get all containers for this robot from database
+            Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
+            if (robotOpt.isPresent()) {
+                Robot robot = robotOpt.get();
+                if (robot.getContainers() != null && !robot.getContainers().isEmpty()) {
+                    // Update each container's status
+                    for (RobotContainer container : robot.getContainers()) {
+                        String containerCode = container.getContainerCode();
+                        robotStateCache.updateContainerStatus(robotId, containerCode, status);
+                        persistContainerStatusToDatabase(robotId, containerCode, status);
+                        log.debug("Updated container {} status for robot {} to: {}",
+                                containerCode, robotId, status.getStatus());
+                    }
+                    markRobotOnline(robotId);
+                    log.info("Updated all {} container statuses for robot {} to: {}",
+                            robot.getContainers().size(), robotId, status.getStatus());
+                } else {
+                    log.warn("No containers found for robot: {}", robotId);
+                }
+            } else {
+                log.warn("Robot not found with code: {}", robotId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to update all container statuses for robot {}", robotId, e);
+        }
+    }
+
+    /**
      * Get robot location with intelligent fallback
      */
     public Optional<RobotLocationDTO> getLocation(String robotId) {
@@ -275,8 +309,10 @@ public class RobotDataService {
             Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
             if (robotOpt.isPresent()) {
                 Robot robot = robotOpt.get();
+                // Direct assignment since both are now double
                 robot.setBatteryStatus(battery.getBattery());
                 robotRepository.save(robot);
+                log.debug("Persisted battery to database for robot {}: {}%", robotId, battery.getBattery());
             }
         } catch (Exception e) {
             log.error("Failed to persist battery to database for robot {}", robotId, e);
@@ -329,20 +365,6 @@ public class RobotDataService {
         return Optional.empty();
     }
 
-    private Optional<RobotBatteryDTO> getBatteryFromDatabase(String robotId) {
-        try {
-            Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
-            if (robotOpt.isPresent() && robotOpt.get().getBatteryStatus() != null) {
-                return Optional.of(RobotBatteryDTO.builder()
-                    .battery(robotOpt.get().getBatteryStatus())
-                    .build());
-            }
-        } catch (Exception e) {
-            log.error("Failed to get battery from database for robot {}", robotId, e);
-        }
-        return Optional.empty();
-    }
-
     private Optional<RobotStatusDTO> getStatusFromDatabase(String robotId) {
         try {
             // Since robot status is not stored in database, return a default or implement accordingly
@@ -366,6 +388,23 @@ public class RobotDataService {
             }
         } catch (Exception e) {
             log.error("Failed to get container status from database for robot {} container {}", robotId, containerCode, e);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RobotBatteryDTO> getBatteryFromDatabase(String robotId) {
+        try {
+            Optional<Robot> robotOpt = robotRepository.findByCode(robotId);
+            if (robotOpt.isPresent()) {
+                Robot robot = robotOpt.get();
+                // Since batteryStatus is now double (primitive), it can't be null
+                // We can just return it directly or check if it's a valid reading (>= 0)
+                return Optional.of(RobotBatteryDTO.builder()
+                    .battery(robot.getBatteryStatus()) // Direct assignment - both are double now
+                    .build());
+            }
+        } catch (Exception e) {
+            log.error("Failed to get battery from database for robot {}", robotId, e);
         }
         return Optional.empty();
     }

@@ -218,7 +218,7 @@ public class OrderController {
         }
     }
 
-    @PostMapping("/pickup/send-otp")
+    @PostMapping("/send-otp")
     public ResponseEntity<ApiResponse<PickupResponse>> sendPickupOtp(@Valid @RequestBody PickupOtpRequest request) {
         try {
             log.info("Received request to send pickup OTP for order code: {}", request.getOrderCode());
@@ -248,7 +248,7 @@ public class OrderController {
         }
     }
 
-    @PostMapping("/pickup/verify-otp")
+    @PostMapping("/verify-otp")
     public ResponseEntity<ApiResponse<PickupResponse>> verifyPickupOtp(@Valid @RequestBody PickupVerifyOtpRequest request) {
         try {
             log.info("Received request to verify pickup OTP for order code: {} and trip code: {}",
@@ -262,7 +262,7 @@ public class OrderController {
 
                 PickupResponse data = PickupResponse.builder()
                         .orderCode(request.getOrderCode())
-                        .status("PICKUP_VERIFIED")
+                        .status("VERIFIED")
                         .verified(true)
                         .build();
 
@@ -281,6 +281,32 @@ public class OrderController {
 
         } catch (Exception e) {
             log.error("Unexpected error verifying pickup OTP for order code {}: {}", request.getOrderCode(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Internal server error occurred"));
+        }
+    }
+
+    /**
+     * Get order details by order code - returns price and all order information
+     */
+    @GetMapping("/{orderCode}")
+    public ResponseEntity<ApiResponse<OrderResponse>> getOrderByOrderCode(@PathVariable String orderCode) {
+        try {
+            log.info("Received request to get order by order code: {}", orderCode);
+
+            OrderResponse orderResponse = orderService.getOrderByOrderCode(orderCode);
+
+            return ResponseEntity.ok(
+                    ApiResponse.success(orderResponse, "Order retrieved successfully")
+            );
+
+        } catch (RuntimeException e) {
+            log.error("Error retrieving order with code {}: {}", orderCode, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+
+        } catch (Exception e) {
+            log.error("Unexpected error retrieving order with code {}: {}", orderCode, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Internal server error occurred"));
         }

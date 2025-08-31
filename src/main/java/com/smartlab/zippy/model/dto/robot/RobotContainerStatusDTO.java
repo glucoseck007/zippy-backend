@@ -11,4 +11,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class RobotContainerStatusDTO {
     private String status; // "free" or "non-free"
+    private Boolean isClosed; // Container open/closed state
 }

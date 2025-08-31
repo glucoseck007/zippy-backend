@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import com.smartlab.zippy.model.dto.robot.RobotTripMqttDTO;
 
 @Slf4j
 @Service
@@ -30,138 +31,83 @@ public class TripStatusService {
     private static final long PROGRESS_CACHE_TTL = 24; // hours
 
     /**
-     * Handle trip status updates received from robots/devices
+     * Update trip status from MQTT message with new payload format
+     * Payload format: {"trip_id": "string", "progress": <double>, "status": <int>,
+     *                  "start_point": "string", "end_point": "string"}
      *
-     * @param robotId Robot ID sending the status update
-     * @param tripCode Trip code
-     * @param payload JSON payload containing progress information
+     * @param tripId Trip ID from MQTT message
+     * @param tripData Trip data from MQTT
+     * @param statusString Mapped status string
      */
     @Transactional
-    public void handleTripStatus(String robotId, String tripCode, String payload) {
+    public void updateTripStatusFromMqtt(String tripId, Object tripData, String statusString) {
         try {
-            // Parse JSON payload to extract progress
-            JsonNode jsonNode = objectMapper.readTree(payload);
-            double progress = jsonNode.get("progress").asDouble();
+            // Handle both old string payload and new DTO format
+            double progress = 0.0;
+            String startPoint = null;
+            String endPoint = null;
 
-            log.info("Received trip status for robot: {}, tripCode: {}, progress: {}", robotId, tripCode, progress);
-
-            // Store progress in cache
-            storeTripProgressInCache(tripCode, (Double) progress);
-
-            // Update trip status based on progress
-            updateTripStatusByProgress(tripCode, progress);
-
-        } catch (Exception e) {
-            log.error("Failed to process trip status message for robot: {}, tripCode: {}, payload: {}",
-                    robotId, tripCode, payload, e);
-        }
-    }
-
-    /**
-     * Update trip status based on progress value
-     * Logic: 0 = PENDING, >0 & <100 = ACTIVE, 100 = DELIVERED
-     *
-     * @param tripCode Trip code to update
-     * @param progress Progress value (0-100)
-     */
-    @Transactional
-    public void updateTripStatusByProgress(String tripCode, double progress) {
-        log.info("Updating trip status for tripCode: {} with progress: {}", tripCode, progress);
-
-        Optional<Trip> tripOpt = tripRepository.findByTripCode(tripCode);
-        if (tripOpt.isEmpty()) {
-            log.warn("Trip not found with code: {}", tripCode);
-            return;
-        }
-
-        Trip trip = tripOpt.get();
-        String currentTripStatus = trip.getStatus();
-
-        // Trip status rules based ONLY on progress:
-        // - progress = 0 → PENDING (regardless of order status)
-        // - progress > 0 and < 100 → ACTIVE
-        // - progress = 100 → DELIVERED
-
-        String newTripStatus;
-
-        if (progress == 0.0) {
-            newTripStatus = "PENDING";
-        } else if (progress >= 100.0) {
-            newTripStatus = "DELIVERED";
-        } else {
-            newTripStatus = "ACTIVE";
-        }
-
-        // Update trip status if changed
-        if (!newTripStatus.equals(currentTripStatus)) {
-            trip.setStatus(newTripStatus);
-
-            // Set end time when trip is delivered
-            if ("DELIVERED".equals(newTripStatus)) {
-                trip.setEndTime(java.time.LocalDateTime.now());
+            if (tripData instanceof RobotTripMqttDTO tripDto) {
+                progress = tripDto.getProgress();
+                startPoint = tripDto.getStart_point();
+                endPoint = tripDto.getEnd_point();
+            } else if (tripData instanceof String) {
+                // Legacy support for string payload
+                JsonNode jsonNode = objectMapper.readTree((String) tripData);
+                progress = jsonNode.get("progress").asDouble();
+                if (jsonNode.has("start_point")) {
+                    startPoint = jsonNode.get("start_point").asText();
+                }
+                if (jsonNode.has("end_point")) {
+                    endPoint = jsonNode.get("end_point").asText();
+                }
             }
 
-            tripRepository.save(trip);
-            log.info("Trip {} status changed from {} to {} with progress: {}", tripCode, currentTripStatus, newTripStatus, progress);
-        } else {
-            log.debug("Trip {} status remains {} with progress: {}", tripCode, currentTripStatus, progress);
-        }
+            log.info("Updating trip {} with progress: {}%, status: {}, start: {}, end: {}",
+                    tripId, progress, statusString, startPoint, endPoint);
 
-        // Synchronize order status based on trip status
-        synchronizeOrderStatusWithTrip(trip);
-    }
+            // Store progress in cache
+            storeTripProgressInCache(tripId, progress);
 
-    /**
-     * Complete a trip by setting its status to COMPLETED
-     * This is used when OTP verification is successful
-     *
-     * @param tripCode Trip code to complete
-     */
-    @Transactional
-    public void completeTripByOtpVerification(String tripCode) {
-        log.info("Completing trip by OTP verification for tripCode: {}", tripCode);
+            // Find trip by trip code or trip ID
+            Optional<Trip> tripOpt = tripRepository.findByTripCode(tripId);
+            if (tripOpt.isEmpty()) {
+                log.warn("Trip not found with code or ID: {}", tripId);
+            }
 
-        Optional<Trip> tripOpt = tripRepository.findByTripCode(tripCode);
-        if (tripOpt.isEmpty()) {
-            log.warn("Trip not found with code: {}", tripCode);
-            throw new RuntimeException("Trip not found with code: " + tripCode);
-        }
-
-        Trip trip = tripOpt.get();
-        trip.setStatus("COMPLETED");
-        trip.setEndTime(java.time.LocalDateTime.now());
-        tripRepository.save(trip);
-
-        log.info("Trip {} status set to COMPLETED after OTP verification", tripCode);
-    }
-
-    /**
-     * Update trip progress and status
-     *
-     * @param tripCode Trip code
-     * @param progress Progress percentage (0-100)
-     */
-    @Transactional
-    public void updateTripProgress(String tripCode, Double progress) {
-        try {
-            log.info("Updating progress for trip: {}, progress: {}%", tripCode, progress);
-
-            Optional<Trip> tripOpt = tripRepository.findByTripCode(tripCode);
             if (tripOpt.isPresent()) {
                 Trip trip = tripOpt.get();
 
-                // Cache the progress for real-time API access
-                storeTripProgressInCache(tripCode, progress);
+                // Update trip details if provided
+                boolean updated = false;
+                if (startPoint != null && !startPoint.equals(trip.getStartPoint())) {
+                    trip.setStartPoint(startPoint);
+                    updated = true;
+                }
+                if (endPoint != null && !endPoint.equals(trip.getEndPoint())) {
+                    trip.setEndPoint(endPoint);
+                    updated = true;
+                }
 
-                // Update trip status based on progress
-                updateTripStatusByProgress(tripCode, progress);
+                // Update status based on mapped status string
+                String currentStatus = trip.getStatus();
+                String newStatus = mapMqttStatusToTripStatus(statusString, progress);
+                if (!newStatus.equals(currentStatus)) {
+                    trip.setStatus(newStatus);
+                    updated = true;
+                    log.info("Trip {} status changed from {} to {}", tripId, currentStatus, newStatus);
+                }
 
-                log.info("Successfully updated progress for trip: {}", tripCode);
+                if (updated) {
+                    tripRepository.save(trip);
+                    log.info("Updated trip {} in database", tripId);
+                }
             } else {
-                log.warn("Trip not found with code: {}", tripCode);
+                log.warn("Trip not found with ID: {}", tripId);
             }
+
         } catch (Exception e) {
-            log.error("Failed to update progress for trip: {}", tripCode, e);
+            log.error("Failed to update trip status from MQTT for trip: {}", tripId, e);
         }
     }
 
@@ -209,61 +155,35 @@ public class TripStatusService {
     }
 
     /**
-     * Synchronize order status with trip status based on business rules
+     * Map MQTT status to internal trip status
+     * Status mapping: 0=Prepare, 1=Load, 2=OnGoing, 3=Delivered, 4=Finish
      *
-     * @param trip Trip entity
+     * @param mqttStatus Status string from MQTT mapping
+     * @param progress Progress value to help determine status
+     * @return Internal trip status
      */
-    private void synchronizeOrderStatusWithTrip(Trip trip) {
-        try {
-            String tripStatus = trip.getStatus();
-            String tripCode = trip.getTripCode();
-
-            // Business rule: If trip is DELIVERED, set associated order(s) to DELIVERED
-            if ("DELIVERED".equals(tripStatus)) {
-                List<Order> orders = orderRepository.findByTripCode(tripCode);
-                for (Order order : orders) {
-                    if (!"DELIVERED".equals(order.getStatus())) {
-                        order.setStatus("DELIVERED");
-                        orderRepository.save(order);
-                        log.info("Order {} status set to DELIVERED because trip {} is DELIVERED", order.getId(), tripCode);
-                    }
+    private String mapMqttStatusToTripStatus(String mqttStatus, double progress) {
+        return switch (mqttStatus) {
+            case "PREPARE" -> "PREPARED";
+            case "LOAD" -> "LOADING";
+            case "ONGOING" -> "ACTIVE";
+            case "DELIVERED" -> "DELIVERED";
+            case "FINISHED" -> "COMPLETED";
+            default -> {
+                // Fallback to progress-based status determination
+                if (progress == 0.0) {
+                    yield "PENDING";
+                } else if (progress >= 100.0) {
+                    yield "DELIVERED";
+                } else {
+                    yield "ACTIVE";
                 }
             }
-        } catch (Exception e) {
-            log.error("Failed to synchronize order status with trip status for tripCode: {}", trip.getTripCode(), e);
-        }
+        };
     }
 
-    /**
-     * Update trip status based on MQTT payload
-     * This method implements the specific logic:
-     * Scenario 1: If the start_point in payload matches the trip's start point in DB:
-     *   - If progress = 0 → PENDING
-     *   - If progress between 1-99 → ACTIVE
-     *   - If progress = 100 → DELIVERED
-     * Scenario 2: If end_point in payload matches the trip's start point in DB:
-     *   - Mark as "PREPARED" (robot is getting ready to go to start point)
-     *
-     * @param tripCode Trip code from the MQTT topic
-     * @param payload JSON payload with progress, start_point, and end_point
-     */
-    @Transactional
-    public void updateTripStatus(String tripCode, String payload) {
+    public void completeTripByOtpVerification(String tripCode) {
         try {
-            log.info("Processing trip status update for tripCode: {} with payload: {}", tripCode, payload);
-
-            // Parse the JSON payload
-            JsonNode jsonNode = objectMapper.readTree(payload);
-
-            // Extract the relevant fields
-            double progress = jsonNode.path("progress").asDouble(0);
-            String payloadStartPoint = jsonNode.path("start_point").asText();
-            String payloadEndPoint = jsonNode.path("end_point").asText();
-
-            log.debug("Extracted progress: {}, start_point: {}, end_point: {}",
-                     progress, payloadStartPoint, payloadEndPoint);
-
-            // Find the trip in the database
             Optional<Trip> tripOpt = tripRepository.findByTripCode(tripCode);
             if (tripOpt.isEmpty()) {
                 log.warn("Trip not found with code: {}", tripCode);
@@ -271,85 +191,28 @@ public class TripStatusService {
             }
 
             Trip trip = tripOpt.get();
-            String tripStartPoint = trip.getStartPoint();
-
-            // Cache the progress for real-time API access
-            storeTripProgressInCache(tripCode, (double)progress);
-
-            // SCENARIO 1: Check if the start point in the payload matches the trip's start point
-            if (payloadStartPoint != null && payloadStartPoint.equals(tripStartPoint)) {
-                log.info("Scenario 1: Start point match found for trip {}: {}", tripCode, payloadStartPoint);
-
-                // Determine the new status based on progress
-                String newStatus;
-                if (progress == 0) {
-                    newStatus = "PENDING";
-                } else if (progress >= 1 && progress < 100) {
-                    newStatus = "ACTIVE";
-                } else if (progress == 100) {
-                    newStatus = "DELIVERED";
-                } else {
-                    log.warn("Invalid progress value: {}. Must be between 0-100.", progress);
-                    return;
-                }
-
-                // Update trip status if it has changed
-                updateTripStatusIfChanged(trip, newStatus, progress);
+            if ("COMPLETED".equals(trip.getStatus())) {
+                log.info("Trip {} is already completed", tripCode);
                 return;
             }
 
-            // SCENARIO 2: Check if the end point in the payload matches the trip's start point
-            if (payloadEndPoint != null && payloadEndPoint.equals(tripStartPoint)) {
-                log.info("Scenario 2: End point match found for trip {}: {} - Robot is preparing",
-                         tripCode, payloadEndPoint);
+            // Update trip status to COMPLETED
+            trip.setStatus("COMPLETED");
+            tripRepository.save(trip);
+            log.info("Trip {} marked as COMPLETED", tripCode);
 
-                // Mark trip as PREPARED - robot is getting ready to go to start point
-                String newStatus = "PREPARED";
-
-                // Only update if status is different and not already in a more advanced state
-                String currentStatus = trip.getStatus();
-                if (!"ACTIVE".equals(currentStatus) && !"DELIVERED".equals(currentStatus) &&
-                    !newStatus.equals(currentStatus)) {
-
-                    trip.setStatus(newStatus);
-                    tripRepository.save(trip);
-                    log.info("Trip {} status changed from {} to {} (preparing to reach start point)",
-                            tripCode, currentStatus, newStatus);
+            // Update associated orders to DELIVERED
+            List<Order> orders = orderRepository.findByTripId(trip.getId());
+            for (Order order : orders) {
+                if (!"DELIVERED".equals(order.getStatus())) {
+                    order.setStatus("DELIVERED");
+                    orderRepository.save(order);
+                    log.info("Order {} associated with trip {} marked as DELIVERED", order.getId(), tripCode);
                 }
-                return;
             }
-
-            // If neither scenario matches, just log and do nothing
-            log.info("No matching scenario for trip {}: payload start={}, end={}, trip start={}",
-                    tripCode, payloadStartPoint, payloadEndPoint, tripStartPoint);
 
         } catch (Exception e) {
-            log.error("Failed to process trip status update for tripCode: {}", tripCode, e);
-        }
-    }
-
-    /**
-     * Helper method to update trip status if changed and synchronize with orders
-     */
-    private void updateTripStatusIfChanged(Trip trip, String newStatus, double progress) {
-        String currentStatus = trip.getStatus();
-        if (!newStatus.equals(currentStatus)) {
-            trip.setStatus(newStatus);
-
-            // Set end time when trip is delivered
-            if ("DELIVERED".equals(newStatus)) {
-                trip.setEndTime(java.time.LocalDateTime.now());
-            }
-
-            tripRepository.save(trip);
-            log.info("Trip {} status changed from {} to {} with progress: {}",
-                    trip.getTripCode(), currentStatus, newStatus, progress);
-
-            // Synchronize order status with trip status
-            synchronizeOrderStatusWithTrip(trip);
-        } else {
-            log.debug("Trip {} status remains {} with progress: {}",
-                    trip.getTripCode(), currentStatus, progress);
+            log.error("Failed to complete trip by OTP verification for trip: {}", tripCode, e);
         }
     }
 }

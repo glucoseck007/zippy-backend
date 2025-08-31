@@ -3,14 +3,19 @@ package com.smartlab.zippy.model.entity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-@Data
+@Getter
+@Setter
+@ToString(exclude = {"trip", "sender", "receiver", "payments"})
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

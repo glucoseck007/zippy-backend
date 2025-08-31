@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -46,21 +47,26 @@ public class Trip {
     @Column(name = "end_time")
     private LocalDateTime endTime;
 
+    @ToString.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", insertable = false, updatable = false)
     private User user;
     
+    @ToString.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "robot_id", insertable = false, updatable = false)
     private Robot robot;
     
+    @ToString.Exclude
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "robot_container_id", insertable = false, updatable = false)
     private RobotContainer robotContainer;
 
+    @ToString.Exclude
     @OneToMany(mappedBy = "trip", cascade = CascadeType.ALL)
     private List<Order> orders;
     
+    @ToString.Exclude
     @OneToMany(mappedBy = "trip", cascade = CascadeType.ALL)
     private List<Product> products;
 }

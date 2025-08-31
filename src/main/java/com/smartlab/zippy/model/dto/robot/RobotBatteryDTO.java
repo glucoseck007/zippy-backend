@@ -10,5 +10,5 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RobotBatteryDTO {
-    private String battery; // Percentage as a string, e.g., "100"
+    private double battery; // Battery percentage as double, e.g., 85.5
 }

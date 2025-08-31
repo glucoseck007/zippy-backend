@@ -43,17 +43,32 @@ public class RobotController {
     }
 
     /**
-     * Get robots by battery status
+     * Get robots by battery level threshold
      *
-     * @param batteryStatus Battery status filter (e.g., "LOW", "MEDIUM", "HIGH")
-     * @return List of robots with specified battery status
+     * @param threshold Battery level threshold (0.0 to 100.0)
+     * @param low Optional parameter: true for robots below threshold, false for above (default: true)
+     * @return List of robots matching battery criteria
      */
-    @GetMapping("/battery/{batteryStatus}")
-    public ResponseEntity<ApiResponse<List<RobotDTO>>> getRobotsByBatteryStatus(
-            @PathVariable String batteryStatus) {
-        List<RobotDTO> robots = robotService.getRobotsByBatteryStatus(batteryStatus);
+    @GetMapping("/battery/level/{threshold}")
+    public ResponseEntity<ApiResponse<List<RobotDTO>>> getRobotsByBatteryLevel(
+            @PathVariable double threshold,
+            @RequestParam(defaultValue = "true") boolean low) {
+        List<RobotDTO> robots = robotService.getRobotsByBatteryLevel(threshold, low);
+        String message = String.format("Robots with battery %s %.1f%% retrieved successfully",
+                low ? "below" : "above", threshold);
+        return ResponseEntity.ok(ApiResponse.success(robots, message));
+    }
+
+    /**
+     * Get robots with low battery (below 20%)
+     *
+     * @return List of robots with low battery
+     */
+    @GetMapping("/battery/low")
+    public ResponseEntity<ApiResponse<List<RobotDTO>>> getLowBatteryRobots() {
+        List<RobotDTO> robots = robotService.getLowBatteryRobots();
         return ResponseEntity.ok(ApiResponse.success(robots,
-                "Robots with battery status '" + batteryStatus + "' retrieved successfully"));
+                "Robots with low battery retrieved successfully"));
     }
 
     /**

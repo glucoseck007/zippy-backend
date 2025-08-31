@@ -28,7 +28,7 @@ public class Robot {
     private String code;
     
     @Column(name = "battery_status")
-    private String batteryStatus;
+    private double batteryStatus;
     
     @Column(name = "location_realtime")
     private String locationRealtime;
