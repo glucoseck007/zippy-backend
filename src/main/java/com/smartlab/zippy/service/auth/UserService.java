@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 /**
  * Service for user-related operations like creation, updates, and retrieval
@@ -72,5 +73,36 @@ public class UserService {
         logger.info("User created with ID: {}", savedUser.getId());
 
         return savedUser;
+    }
+
+    /**
+     * Find a user by credential (email or username)
+     * @param credential The email or username to search for
+     * @return Optional containing the user if found
+     */
+    public Optional<User> getUserByCredential(String credential) {
+        logger.info("Looking up user by credential: {}", credential);
+
+        // First try to find by email
+        Optional<User> userByEmail = userRepository.findByEmail(credential);
+        if (userByEmail.isPresent()) {
+            logger.info("User found by email: {}", credential);
+            return userByEmail;
+        }
+
+        // If not found by email, try by username
+        Optional<User> userByUsername = userRepository.findByUsername(credential);
+        if (userByUsername.isPresent()) {
+            logger.info("User found by username: {}", credential);
+            return userByUsername;
+        }
+
+        logger.info("No user found with credential: {}", credential);
+        return Optional.empty();
+    }
+
+    @Transactional
+    public boolean isExistUser(String credential) {
+        return userRepository.existsByEmail(credential) || userRepository.existsByUsername(credential);
     }
 }

@@ -32,13 +32,14 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
     private static final Pattern STATUS_PATTERN = Pattern.compile("robot/([^/]+)/status");
     private static final Pattern CONTAINER_PATTERN = Pattern.compile("robot/([^/]+)/container");
     private static final Pattern TRIP_PATTERN = Pattern.compile("robot/([^/]+)/trip");
+    private static final Pattern TRIP_STATE_PATTERN = Pattern.compile("robot/([^/]+)/trip/state");
     private static final Pattern QR_CODE_PATTERN = Pattern.compile("robot/([^/]+)/qr-code");
     private static final Pattern FORCE_MOVE_PATTERN = Pattern.compile("robot/([^/]+)/force_move");
     private static final Pattern WARNING_PATTERN = Pattern.compile("robot/([^/]+)/warning");
+    private static final Pattern HEARTBEAT_PATTERN = Pattern.compile("robot/([^/]+)/heartbeat");
 
     public MqttSubscriberImpl(
-            RobotMessageService robotMessageService,
-            MqttProperties mqttProperties) {
+            MqttProperties mqttProperties, RobotMessageService robotMessageService) {
         this.robotMessageService = robotMessageService;
         this.brokerUrl = mqttProperties.getBroker();
         this.clientId = mqttProperties.getClientId() + "-subscriber";
@@ -138,6 +139,8 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
             subscribe("robot/+/qr-code");
             subscribe("robot/+/force_move");
             subscribe("robot/+/warning");
+            subscribe("robot/+/heartbeat");
+            subscribe("robot/+/trip/state");
 
             log.info("Successfully subscribed to all inbound robot topics");
         } catch (Exception e) {
@@ -167,67 +170,100 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
 
     /**
      * Process incoming MQTT messages and route them to appropriate handlers
-     * based on the new topic structure and payload formats
+     * based on the topic structure and payload formats
      */
     private void processMessage(String topic, String payload) {
         try {
-            // Match topic with appropriate pattern and route to correct handler
+            log.info("Processing message from topic: {} with payload: {}", topic, payload);
+
+            Matcher tripStateMatcher = TRIP_STATE_PATTERN.matcher(topic);
+            if (tripStateMatcher.matches()) {
+                String robotCode = tripStateMatcher.group(1);
+                log.info("Received trip state message from robot: {} - {}", robotCode, payload);
+                robotMessageService.handleTrip(robotCode, payload);
+                return;
+            }
+
+            // Match topic with appropriate pattern and extract robot code
             Matcher locationMatcher = LOCATION_PATTERN.matcher(topic);
             if (locationMatcher.matches()) {
                 String robotCode = locationMatcher.group(1);
-                robotMessageService.handleLocationMessage(robotCode, payload);
+                log.info("Received location message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleLocationMessage(robotCode, payload);
+                robotMessageService.handleLocation(robotCode, payload);
                 return;
             }
 
             Matcher batteryMatcher = BATTERY_PATTERN.matcher(topic);
             if (batteryMatcher.matches()) {
                 String robotCode = batteryMatcher.group(1);
-                robotMessageService.handleBatteryMessage(robotCode, payload);
+                log.info("Received battery message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleBattery(robotCode, payload);
+                robotMessageService.handleBattery(robotCode, payload);
                 return;
             }
 
             Matcher statusMatcher = STATUS_PATTERN.matcher(topic);
             if (statusMatcher.matches()) {
                 String robotCode = statusMatcher.group(1);
-                robotMessageService.handleStatusMessage(robotCode, payload);
+                log.info("Received status message from robot: {} - {}", robotCode, payload);
+                robotMessageService.handleStatus(robotCode, payload);
                 return;
             }
 
             Matcher containerMatcher = CONTAINER_PATTERN.matcher(topic);
             if (containerMatcher.matches()) {
                 String robotCode = containerMatcher.group(1);
-                robotMessageService.handleContainerMessage(robotCode, payload);
+                log.info("Received container message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleContainerStatus(robotCode, payload);
+                robotMessageService.handleContainerStatus(robotCode, payload);
                 return;
             }
 
             Matcher tripMatcher = TRIP_PATTERN.matcher(topic);
             if (tripMatcher.matches()) {
                 String robotCode = tripMatcher.group(1);
-                robotMessageService.handleTripMessage(robotCode, payload);
+                log.info("Received trip message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleTrip(robotCode, payload);
+                robotMessageService.handleTripState(robotCode, payload);
                 return;
             }
 
             Matcher qrCodeMatcher = QR_CODE_PATTERN.matcher(topic);
             if (qrCodeMatcher.matches()) {
                 String robotCode = qrCodeMatcher.group(1);
-                robotMessageService.handleQrCodeMessage(robotCode, payload);
+                log.info("Received QR code message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleQRCode(robotCode, payload);
+                robotMessageService.handleQRCode(robotCode, payload);
                 return;
             }
 
             Matcher forceMoveMapping = FORCE_MOVE_PATTERN.matcher(topic);
             if (forceMoveMapping.matches()) {
                 String robotCode = forceMoveMapping.group(1);
-                robotMessageService.handleForceMoveMessage(robotCode, payload);
+                log.info("Received force move message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleForceMoveMessage(robotCode, payload);
                 return;
             }
 
             Matcher warningMatcher = WARNING_PATTERN.matcher(topic);
             if (warningMatcher.matches()) {
                 String robotCode = warningMatcher.group(1);
-                robotMessageService.handleWarningMessage(robotCode, payload);
+                log.info("Received warning message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleWarningMessage(robotCode, payload);
                 return;
             }
 
+            Matcher heartbeatMatcher = HEARTBEAT_PATTERN.matcher(topic);
+            if (heartbeatMatcher.matches()) {
+                String robotCode = heartbeatMatcher.group(1);
+                log.info("Received heartbeat message from robot: {} - {}", robotCode, payload);
+                // TODO: Call robotMessageService.handleHeartbeat(robotCode, payload);
+                robotMessageService.handleHeartbeat(robotCode, payload);
+                return;
+            }
+
+            // If no pattern matches, log as unhandled
             log.warn("Received message on unhandled topic: {} with payload: {}", topic, payload);
         } catch (Exception e) {
             log.error("Error processing message from topic {}: {}", topic, e.getMessage(), e);
@@ -247,4 +283,3 @@ public class MqttSubscriberImpl implements MqttMessageSubscriber {
         }
     }
 }
-

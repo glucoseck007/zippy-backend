@@ -36,8 +36,8 @@ public class Trip {
     @Column(name = "robot_id")
     private UUID robotId;
     
-    @Column(name = "robot_container_id")
-    private Long robotContainerId;
+//    @Column(name = "robot_container_id")
+//    private Long robotContainerId;
 
     private String status;
 
@@ -57,10 +57,10 @@ public class Trip {
     @JoinColumn(name = "robot_id", insertable = false, updatable = false)
     private Robot robot;
     
-    @ToString.Exclude
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "robot_container_id", insertable = false, updatable = false)
-    private RobotContainer robotContainer;
+//    @ToString.Exclude
+//    @ManyToOne(fetch = FetchType.LAZY)
+//    @JoinColumn(name = "robot_container_id", insertable = false, updatable = false)
+//    private RobotContainer robotContainer;
 
     @ToString.Exclude
     @OneToMany(mappedBy = "trip", cascade = CascadeType.ALL)

@@ -12,11 +12,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RobotDTO {
-    private UUID id;
     private String code;
     private double batteryStatus;
     private String locationRealtime;
-    private String status; // Available, Busy, Maintenance, Offline, etc.
-    private int containerCount;
-    private int activeTripsCount;
 }

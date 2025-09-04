@@ -2,319 +2,334 @@ package com.smartlab.zippy.service.robot;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartlab.zippy.component.RobotStatusCache;
+import com.smartlab.zippy.interfaces.MqttCommandPublisher;
 import com.smartlab.zippy.model.dto.robot.*;
-import com.smartlab.zippy.service.trip.TripStatusService;
+import com.smartlab.zippy.model.dto.trip.TripStateMqttDTO;
+import com.smartlab.zippy.model.entity.Order;
+import com.smartlab.zippy.model.entity.Product;
+import com.smartlab.zippy.model.entity.Robot;
+import com.smartlab.zippy.model.entity.Trip;
+import com.smartlab.zippy.repository.OrderRepository;
+import com.smartlab.zippy.repository.ProductRepository;
+import com.smartlab.zippy.repository.RobotRepository;
+import com.smartlab.zippy.repository.TripRepository;
+import com.smartlab.zippy.service.qr.QRCodeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Service responsible for handling incoming MQTT messages from robots
- * Updated to handle the new topic structure and payload formats
- */
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class RobotMessageService {
 
     private final ObjectMapper objectMapper;
-    private final RobotDataService robotDataService;
-    private final TripStatusService tripStatusService;
+    private final TripRepository tripRepository;
+    private final RobotRepository robotRepository;
+    private final RobotStatusCache robotStatusCache;
+    private final ApplicationEventPublisher eventPublisher;
+    private final QRCodeService qrCodeService;
+    private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final MqttCommandPublisher mqttCommandPublisher;
 
-    /**
-     * Handle robot location message
-     * Payload format: {"roomCode": "String"}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleLocationMessage(String robotCode, String payload) {
+    // Map to track the last QR code publishing time for each robot-trip combination
+    private final Map<String, LocalDateTime> qrCodePublishingTracker = new ConcurrentHashMap<>();
+
+    // QR code cooldown period in seconds
+    private static final long QR_CODE_COOLDOWN_SECONDS = 30;
+
+    private boolean isExistRobot(String robotCode) {
+        Optional<Robot> robotOptional = robotRepository.findByCode(robotCode);
+        return robotOptional.isPresent();
+    }
+
+    public boolean isRobotFree(String robotCode) {
+        return robotStatusCache.isFree(robotCode);
+    }
+
+    public boolean isAlive(String robotCode) {
+        return robotStatusCache.isAlive(robotCode);
+    }
+
+    @Transactional
+    public void handleBattery(String robotCode, String payload) {
+        log.info("handleBattery robotCode:{}, payload:{}", robotCode, payload);
+
         try {
+            double batteryLevel = Double.parseDouble(payload);
+
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
+
+            Optional<Robot> robotOptional = robotRepository.findByCode(robotCode);
+            if (robotOptional.isPresent()) {
+                Robot robot = robotOptional.get();
+                robot.setBatteryStatus(batteryLevel);
+                robotRepository.save(robot);
+                log.info("Robot {} battery level updated to {}", robotCode, batteryLevel);
+            }
+        } catch (NumberFormatException e) {
+            log.error("Failed to parse battery level for robot {}: {}", robotCode, payload, e);
+        } catch (Exception e) {
+            log.error("Failed to handle battery message for robot {}: {}", robotCode, e.getMessage(), e);
+        }
+    }
+
+    @Transactional
+    public void handleLocation(String robotCode, String payload) {
+        try {
+            log.info("Processing location update for robot: {} with payload: {}", robotCode, payload);
+
+            // Parse the JSON payload
             RobotLocationMqttDTO locationData = objectMapper.readValue(payload, RobotLocationMqttDTO.class);
-            log.info("Robot {} location update - Room: {}", robotCode, locationData.getRoomCode());
 
-            // Convert to existing location DTO format for compatibility
-            RobotLocationDTO location = RobotLocationDTO.builder()
-                    .roomCode(locationData.getRoomCode())
-                    .build();
+            // Find the robot by code
+            Optional<Robot> robotOptional = robotRepository.findByCode(robotCode);
 
-            robotDataService.updateLocation(robotCode, location);
+            if (robotOptional.isEmpty()) {
+                log.error("Robot with code {} not found in database", robotCode);
+                return;
+            }
+
+            Robot robot = robotOptional.get();
+            String newRoomCode = locationData.getRoomCode();
+            String currentRoomCode = robot.getRoomCode();
+
+            // Update robot location
+            robot.setRoomCode(newRoomCode);
+            robot.setLocationRealtime(newRoomCode); // Also update real-time location
+
+            // Save to database
+            robotRepository.save(robot);
+
+            // Log the location change
+            if (!newRoomCode.equals(currentRoomCode)) {
+                log.info("Robot {} moved from room '{}' to room '{}'",
+                        robotCode, currentRoomCode, newRoomCode);
+            } else {
+                log.debug("Robot {} location confirmed at room '{}'", robotCode, newRoomCode);
+            }
+
         } catch (JsonProcessingException e) {
             log.error("Failed to parse location payload for robot {}: {}", robotCode, payload, e);
         } catch (Exception e) {
-            log.error("Failed to handle location message for robot {}", robotCode, e);
+            log.error("Failed to handle location message for robot {}: {}", robotCode, e.getMessage(), e);
         }
     }
 
-    /**
-     * Handle robot battery status message
-     * Payload format: {"battery": <double>}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleBatteryMessage(String robotCode, String payload) {
+    @Transactional
+    public void handleStatus(String robotCode, String payload) {
         try {
-            RobotBatteryMqttDTO batteryData = objectMapper.readValue(payload, RobotBatteryMqttDTO.class);
-            log.info("Robot {} battery level: {}%", robotCode, batteryData.getBattery());
+            log.info("Processing status update for robot: {} with payload: {}", robotCode, payload);
 
-            // Convert to existing battery DTO format - both are now double
-            RobotBatteryDTO battery = RobotBatteryDTO.builder()
-                    .battery(batteryData.getBattery()) // Direct assignment - both are double
-                    .build();
-
-            robotDataService.updateBattery(robotCode, battery);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse battery payload for robot {}: {}", robotCode, payload, e);
-        } catch (Exception e) {
-            log.error("Failed to handle battery message for robot {}", robotCode, e);
-        }
-    }
-
-    /**
-     * Handle robot status message
-     * Payload format: {"status": "free" or "non-free"}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleStatusMessage(String robotCode, String payload) {
-        try {
+            // Parse the JSON payload
             RobotStatusMqttDTO statusData = objectMapper.readValue(payload, RobotStatusMqttDTO.class);
-            log.info("Robot {} status: {}", robotCode, statusData.getStatus());
 
-            // Convert to existing status DTO format for compatibility
-            RobotStatusDTO status = RobotStatusDTO.builder()
-                    .status(statusData.getStatus())
-                    .build();
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
 
-            // Use heartbeat handler for status messages to ensure proper online status tracking
-            robotDataService.handleRobotHeartbeat(robotCode, status);
+            robotStatusCache.updateStatus(robotCode, statusData.getStatus());
+
+            log.info("Robot {} status updated to '{}'", robotCode, statusData.getStatus());
+
+            // Check if robot becomes available and trigger dequeue
+            boolean isRobotAlive = isAlive(robotCode);
+            boolean isRobotFree = isRobotFree(robotCode);
+
+            log.debug("Robot {} - isAlive: {}, isFree: {}", robotCode, isRobotAlive, isRobotFree);
+
+            if (isRobotAlive && isRobotFree) {
+                log.info("Robot {} is now available, publishing dequeue event", robotCode);
+                eventPublisher.publishEvent(new RobotStatusChangedEvent(this, robotCode, true));
+            }
+
         } catch (JsonProcessingException e) {
             log.error("Failed to parse status payload for robot {}: {}", robotCode, payload, e);
-
-            // If payload parsing fails, still mark robot as online (simple heartbeat)
-            robotDataService.handleRobotHeartbeat(robotCode);
         } catch (Exception e) {
-            log.error("Failed to handle status message for robot {}", robotCode, e);
+            log.error("Failed to handle status message for robot {}: {}", robotCode, e.getMessage(), e);
         }
     }
 
-    /**
-     * Handle robot container status message
-     * Payload format: {"status": "free" or "non-free", "isClosed": true or false}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleContainerMessage(String robotCode, String payload) {
+    @Transactional
+    public void handleContainerStatus(String robotCode, String payload) {
         try {
+            log.info("Processing container update for robot: {} with payload: {}", robotCode, payload);
+
             RobotContainerMqttDTO containerData = objectMapper.readValue(payload, RobotContainerMqttDTO.class);
-            log.info("Robot {} container status: {}, isClosed: {}",
-                    robotCode, containerData.getStatus(), containerData.isClosed());
 
-            // Convert to existing container status DTO format for compatibility
-            RobotContainerStatusDTO containerStatus = RobotContainerStatusDTO.builder()
-                    .status(containerData.getStatus())
-                    .isClosed(containerData.isClosed())
-                    .build();
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
 
-            // Update container status for all containers of this robot
-            // Note: The original method expected containerCode, but new format doesn't specify it
-            // We'll need to update all containers for this robot
-            robotDataService.updateAllContainerStatuses(robotCode, containerStatus);
+            robotStatusCache.updateContainerStatus(robotCode, containerData);
+
         } catch (JsonProcessingException e) {
-            log.error("Failed to parse container payload for robot {}: {}", robotCode, payload, e);
-        } catch (Exception e) {
-            log.error("Failed to handle container message for robot {}", robotCode, e);
+            throw new RuntimeException(e);
         }
     }
 
-    /**
-     * Handle robot trip message
-     * Payload format: {"trip_id": "string", "progress": <double>, "status": <int>,
-     *                  "start_point": "string", "end_point": "string"}
-     * Status mapping: 0=Prepare, 1=Load, 2=OnGoing, 3=Delivered, 4=Finish
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleTripMessage(String robotCode, String payload) {
+    @Transactional
+    public void handleQRCode(String robotCode, String payload) {
         try {
-            RobotTripMqttDTO tripData = objectMapper.readValue(payload, RobotTripMqttDTO.class);
-            log.info("Robot {} trip update - ID: {}, Progress: {}%, Status: {}, Start: {}, End: {}",
-                    robotCode, tripData.getTrip_id(), tripData.getProgress(),
-                    tripData.getStatus(), tripData.getStart_point(), tripData.getEnd_point());
+            log.info("Processing QR code update for robot: {} with payload: {}", robotCode, payload);
 
-            // Map status integer to string
-            String statusString = mapTripStatusToString(tripData.getStatus());
-
-            // Process the trip update using TripStatusService
-            tripStatusService.updateTripStatusFromMqtt(tripData.getTrip_id(), tripData, statusString);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse trip payload for robot {}: {}", robotCode, payload, e);
-        } catch (Exception e) {
-            log.error("Failed to handle trip message for robot {}", robotCode, e);
-        }
-    }
-
-    /**
-     * Handle robot QR code message
-     * Payload format: {"qr-code": "base64", "status": <int>}
-     * Status mapping: 0=Canceled, 1=Done, 2=Waiting
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleQrCodeMessage(String robotCode, String payload) {
-        try {
             RobotQrCodeMqttDTO qrCodeData = objectMapper.readValue(payload, RobotQrCodeMqttDTO.class);
-            String statusString = mapQrCodeStatusToString(qrCodeData.getStatus());
 
-            log.info("Robot {} QR code update - Status: {} ({})",
-                    robotCode, qrCodeData.getStatus(), statusString);
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
 
-            // Handle QR code status updates
-            handleQrCodeStatusUpdate(robotCode, qrCodeData, statusString);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse QR code payload for robot {}: {}", robotCode, payload, e);
+            robotStatusCache.updateQrCode(robotCode, qrCodeData);
+
         } catch (Exception e) {
-            log.error("Failed to handle QR code message for robot {}", robotCode, e);
+            log.error("Failed to handle QR code message for robot {}: {}", robotCode, e.getMessage(), e);
         }
     }
 
-    /**
-     * Handle robot force move message
-     * Payload format: {"end_point": "string"}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleForceMoveMessage(String robotCode, String payload) {
+    @Transactional
+    public void handleHeartbeat(String robotCode, String payload) {
         try {
-            RobotForceMoveDTO forceMoveData = objectMapper.readValue(payload, RobotForceMoveDTO.class);
-            log.info("Robot {} force move command - Destination: {}",
-                    robotCode, forceMoveData.getEndPoint());
+            log.info("Processing heartbeat update for robot: {} with payload: {}", robotCode, payload);
 
-            // Handle force move command
-            handleForceMoveCommand(robotCode, forceMoveData);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse force move payload for robot {}: {}", robotCode, payload, e);
+            RobotHeartbeatMqttDTO heart = objectMapper.readValue(payload, RobotHeartbeatMqttDTO.class);
+
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
+
+            robotStatusCache.updateHeartbeat(robotCode, heart);
+
+            // Check if robot becomes available and trigger dequeue
+            boolean isRobotAlive = isAlive(robotCode);
+            boolean isRobotFree = isRobotFree(robotCode);
+
+            log.debug("Robot {} heartbeat - isAlive: {}, isFree: {}", robotCode, isRobotAlive, isRobotFree);
+
+            if (isRobotAlive && isRobotFree) {
+                log.info("Robot {} heartbeat shows available, publishing dequeue event", robotCode);
+                eventPublisher.publishEvent(new RobotStatusChangedEvent(this, robotCode, true));
+            }
+
         } catch (Exception e) {
-            log.error("Failed to handle force move message for robot {}", robotCode, e);
+            log.error("Failed to handle heartbeat message for robot {}: {}", robotCode, e.getMessage(), e);
         }
     }
 
-    /**
-     * Handle robot warning message
-     * Payload format: {"title": "string", "message": "string", "timestamp": "string"}
-     *
-     * @param robotCode Robot code
-     * @param payload JSON payload
-     */
-    public void handleWarningMessage(String robotCode, String payload) {
+    @Transactional
+    public void handleTrip(String robotCode, String payload) {
         try {
-            RobotWarningDTO warningData = objectMapper.readValue(payload, RobotWarningDTO.class);
-            log.warn("Robot {} warning - Title: {}, Message: {}, Timestamp: {}",
-                    robotCode, warningData.getTitle(), warningData.getMessage(), warningData.getTimestamp());
+            log.info("Processing trip update for robot: {} with payload: {}", robotCode, payload);
 
-            // Handle robot warning
-            handleRobotWarning(robotCode, warningData);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse warning payload for robot {}: {}", robotCode, payload, e);
+            TripStateMqttDTO tripCache = objectMapper.readValue(payload, TripStateMqttDTO.class);
+
+            Trip trip = tripRepository.findByTripCode(tripCache.getTrip_id()).get();
+
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
+
+            Optional<Robot> robotOptional = robotRepository.findByCode(robotCode);
+            Robot robot = robotOptional.get();
+
+            int status = tripCache.getStatus();
+
+            switch (status) {
+                case 0: // Prepare
+                    robot.setLocationRealtime(tripCache.getStart_point());
+                    robot.setRoomCode(tripCache.getStart_point());
+                    trip.setStatus("PREPARE");
+                    log.info("Progress: {}", tripCache.getProgress());
+                    break;
+                case 1: // Load
+                    robot.setLocationRealtime(tripCache.getStart_point());
+                    robot.setRoomCode(tripCache.getStart_point());
+                    trip.setStatus("LOADING");
+                    publishQRCode(robotCode, tripCache.getTrip_id());
+                    log.info("Progress: {}", tripCache.getProgress());
+                    break;
+                case 2: // OnGoing
+                    // Do nothing, keep current location
+                    trip.setStatus("ONGOING");
+                    log.info("Progress: {}", tripCache.getProgress());
+                    break;
+                case 3: // Delivered
+                    robot.setLocationRealtime(tripCache.getEnd_point());
+                    robot.setRoomCode(tripCache.getEnd_point());
+                    trip.setStatus("DELIVERED");
+                    log.info("Progress: {}", tripCache.getProgress());
+                    break;
+                case 4: // Finish
+                    robot.setLocationRealtime(tripCache.getEnd_point());
+                    robot.setRoomCode(tripCache.getEnd_point());
+                    trip.setStatus("FINISHED");
+                    publishQRCode(robotCode, tripCache.getTrip_id());
+                    log.info("Progress: {}", tripCache.getProgress());
+                    break;
+                default:
+                    log.warn("Unknown tripCache status {} for robot {}", status, robotCode);
+            }
+            robotStatusCache.updateTrip(robotCode, tripCache);
+            robotRepository.save(robot);
+            tripRepository.save(trip);
         } catch (Exception e) {
-            log.error("Failed to handle warning message for robot {}", robotCode, e);
+            log.error("Failed to handle trip message for robot {}: {}", robotCode, e.getMessage(), e);
         }
     }
 
-    // Legacy methods for backward compatibility
-    /**
-     * @deprecated Use handleContainerMessage instead
-     */
-    @Deprecated
-    public void handleContainerStatus(String robotId, String containerCode, String payload) {
-        handleContainerMessage(robotId, payload);
+    public void handleTripState(String robotCode, String payload) {
+        try {
+            log.info("Processing trip state update for robot: {} with payload: {}", robotCode, payload);
+
+            TripStateMqttDTO tripState = objectMapper.readValue(payload, TripStateMqttDTO.class);
+
+            if (!isExistRobot(robotCode)) {
+                return;
+            }
+
+            // Currently, just log the trip state. Extend this method as needed.
+            log.info("Robot {} trip state updated: trip_id={}, state={}",
+                    robotCode, tripState.getTrip_id(), tripState.getProgress());
+
+            robotStatusCache.updateTrip(robotCode, tripState);
+
+        } catch (Exception e) {
+            log.error("Failed to handle trip state message for robot {}: {}", robotCode, e.getMessage(), e);
+        }
     }
 
-    /**
-     * @deprecated Use handleLocationMessage instead
-     */
-    @Deprecated
-    public void handleLocation(String robotId, String payload) {
-        handleLocationMessage(robotId, payload);
-    }
+    private void publishQRCode(String robotCode, String tripCode) {
+        Order order = orderRepository.getOrderByTripCode(tripCode);
+        if (order == null) {
+            return;
+        }
+        Product product = productRepository.findById(order.getProductId()).get();
+        String qrCodeBase64 = qrCodeService.generateQRCode(tripCode, order.getOrderCode(), product.getCode());
+        RobotQrCodeMqttDTO robotQrCodeMqttDTO = new RobotQrCodeMqttDTO(qrCodeBase64, 2);
 
-    /**
-     * @deprecated Use handleBatteryMessage instead
-     */
-    @Deprecated
-    public void handleBattery(String robotId, String payload) {
-        handleBatteryMessage(robotId, payload);
-    }
+        // Cooldown logic: Check the last publishing time
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime lastPublishedTime = qrCodePublishingTracker.get(robotCode + "_" + tripCode);
 
-    /**
-     * @deprecated Use handleStatusMessage instead
-     */
-    @Deprecated
-    public void handleStatus(String robotId, String payload) {
-        handleStatusMessage(robotId, payload);
-    }
+        if (lastPublishedTime == null || java.time.Duration.between(lastPublishedTime, now).getSeconds() >= QR_CODE_COOLDOWN_SECONDS) {
+            // Publish the QR code command
+            mqttCommandPublisher.publishQrCodeCommand(robotCode, qrCodeBase64, 2);
 
-    /**
-     * @deprecated Use handleTripMessage instead
-     */
-    @Deprecated
-    public void handleTripStatus(String robotId, String tripId, String payload) {
-        handleTripMessage(robotId, payload);
-    }
-
-    /**
-     * Handle robot connection lost event
-     *
-     * @param robotCode Robot code
-     */
-    public void handleConnectionLost(String robotCode) {
-        log.warn("Robot {} connection lost", robotCode);
-        robotDataService.markRobotOffline(robotCode);
-    }
-
-    // Helper methods
-    private String mapTripStatusToString(int status) {
-        return switch (status) {
-            case 0 -> "PREPARE";
-            case 1 -> "LOAD";
-            case 2 -> "ONGOING";
-            case 3 -> "DELIVERED";
-            case 4 -> "FINISHED";
-            default -> "UNKNOWN";
-        };
-    }
-
-    private String mapQrCodeStatusToString(int status) {
-        return switch (status) {
-            case 0 -> "CANCELED";
-            case 1 -> "DONE";
-            case 2 -> "WAITING";
-            default -> "UNKNOWN";
-        };
-    }
-
-    private void handleQrCodeStatusUpdate(String robotCode, RobotQrCodeMqttDTO qrCodeData, String statusString) {
-        // TODO: Implement QR code status handling logic
-        // This could involve updating order status, notifying users, etc.
-        log.info("Processing QR code status update for robot {}: {}", robotCode, statusString);
-    }
-
-    private void handleForceMoveCommand(String robotCode, RobotForceMoveDTO forceMoveData) {
-        // TODO: Implement force move command handling logic
-        // This could involve creating emergency trips, updating robot status, etc.
-        log.info("Processing force move command for robot {} to {}", robotCode, forceMoveData.getEndPoint());
-    }
-
-    private void handleRobotWarning(String robotCode, RobotWarningDTO warningData) {
-        // TODO: Implement warning handling logic
-        // This could involve alerting administrators, logging to monitoring systems, etc.
-        log.warn("Processing warning from robot {}: {} - {}",
-                robotCode, warningData.getTitle(), warningData.getMessage());
+            // Update the last published time
+            qrCodePublishingTracker.put(robotCode + "_" + tripCode, now);
+            log.info("Published QR code for robot {}: {}", robotCode, qrCodeBase64);
+        } else {
+            log.info("Skipped QR code publishing for robot {}: cooldown active", robotCode);
+        }
     }
 }

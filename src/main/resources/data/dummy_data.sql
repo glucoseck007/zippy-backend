@@ -10,8 +10,8 @@ VALUES
     (UUID_TO_BIN(UUID()), 'ROBOT-001', '85', '37.422740,-122.084058'),
     (UUID_TO_BIN(UUID()), 'ROBOT-002', '72', '37.425670,-122.089834');
 
-SET @robot1 := (SELECT id FROM robot WHERE code = 'ROBOT-001' LIMIT 1);
-SET @robot2 := (SELECT id FROM robot WHERE code = 'ROBOT-002' LIMIT 1);
+SET @robot1 := (SELECT id FROM robot WHERE code = 'ROBOT001' LIMIT 1);
+SET @robot2 := (SELECT id FROM robot WHERE code = 'ROBOT002' LIMIT 1);
 
 INSERT INTO robot_container (robot_id, container_code, status)
 VALUES

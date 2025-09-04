@@ -27,15 +27,10 @@ public class OrderRequest {
     @NotBlank(message = "Robot code cannot be empty")
     private String robotCode;
 
-    @NotBlank(message = "Robot container code cannot be empty")
-    private String robotContainerCode;
-
     @NotBlank(message = "Start point cannot be empty")
     private String startPoint;
 
     @NotBlank(message = "Endpoint cannot be empty")
-    private String endpoint;
+    private String endPoint;
 
-    @Nullable
-    private boolean approved;
 }

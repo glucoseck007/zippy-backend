@@ -13,8 +13,13 @@ import java.util.UUID;
 @Repository
 public interface TripRepository extends CrudRepository<Trip, UUID> {
     List<Trip> findByUserId(UUID userId);
+
     List<Trip> findByRobotId(UUID robotId);
 
+    @Query("SELECT t FROM Trip t JOIN FETCH t.robot JOIN Order o ON t.id = o.tripId WHERE o.orderCode = :orderCode")
+    Optional<Trip> findTripByOrderCode(String orderCode);
+
+    @Query("SELECT t FROM Trip t JOIN FETCH t.robot WHERE t.tripCode = :tripCode")
     Optional<Trip> findByTripCode(String tripCode);
 
     @Query("SELECT t FROM Trip t WHERE t.robotId = :robotId AND t.status = 'ACTIVE'")
@@ -27,4 +32,5 @@ public interface TripRepository extends CrudRepository<Trip, UUID> {
     Optional<Trip> findByTripCodeAndRobotCode(@Param("tripCode") String tripCode, @Param("robotCode") String robotCode);
 
     List<Trip> findByStatusIn(List<String> statuses);
+
 }

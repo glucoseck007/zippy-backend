@@ -53,7 +53,7 @@ application:
       refresh-token:
         expiration: 604800000
 mqtt:
-    broker: tcp://36.50.135.207:1883
+    broker: tcp://192.168.0.191:21213
     client-id: mqtt-listener-service
     username: admin
     password: 123@123
@@ -63,18 +63,24 @@ mqtt:
       - robot/+/status
       - robot/+/container
       - robot/+/trip
+      - robot/+/trip/state
       - robot/+/qr-code
       - robot/+/force_move
       - robot/+/warning
+      - robot/+/heartbeat
     outboundTopics:
       - robot/+/location
       - robot/+/battery
       - robot/+/status
       - robot/+/container
       - robot/+/trip
+      - robot/+/trip/register
+      - robot/+/trip/cancel
+      - robot/+/trip/command
       - robot/+/qr-code
       - robot/+/force_move
       - robot/+/warning
+      - robot/+/heartbeat
     qos: 1
 
 payos:

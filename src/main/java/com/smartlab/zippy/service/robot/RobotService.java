@@ -155,13 +155,9 @@ public class RobotService {
         String status = determineRobotStatus(robot, activeTripsCount);
 
         return RobotDTO.builder()
-                .id(robot.getId())
                 .code(robot.getCode())
                 .batteryStatus(robot.getBatteryStatus())
                 .locationRealtime(robot.getLocationRealtime())
-                .status(status)
-                .containerCount(containerCount)
-                .activeTripsCount(activeTripsCount)
                 .build();
     }
 

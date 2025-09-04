@@ -23,14 +23,14 @@ public class Product {
     
     @Column(name = "trip_id")
     private UUID tripId;
-    
+
     @Column(name = "container_code")
     private String containerCode;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "trip_id", insertable = false, updatable = false)
     private Trip trip;
-    
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "container_code", referencedColumnName = "container_code", insertable = false, updatable = false)
     private RobotContainer container;

@@ -8,4 +8,5 @@ import lombok.Data;
 public class RobotContainerMqttDTO {
     private String status; // "free" or "non-free"
     private boolean isClosed;
+    private double weight;
 }

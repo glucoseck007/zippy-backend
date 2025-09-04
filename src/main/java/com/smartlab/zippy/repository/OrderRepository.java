@@ -26,11 +26,21 @@ public interface OrderRepository extends CrudRepository<Order, UUID> {
     @Query("SELECT o FROM Order o " +
            "JOIN o.trip t " +
            "WHERE t.tripCode = :tripCode")
-    List<Order> findByTripCode(@Param("tripCode") String tripCode);
+    Order findByTripCode(@Param("tripCode") String tripCode);
 
     // Query orders by sender ID (userId)
     List<Order> findByUserId(UUID userId);
 
     // Query orders by receiver ID
     List<Order> findByReceiverId(UUID receiverId);
+
+    String id(UUID id);
+
+    @Query("SELECT o FROM Order o WHERE o.status = 'QUEUED' ORDER BY o.createdAt ASC")
+    Optional<Order> findOrderByCreatedAtAsc();
+
+    Optional<Object> findFirstByStatusOrderByCreatedAtAsc(String queued);
+
+    @Query("SELECT o FROM Order o JOIN o.trip t WHERE t.tripCode = :tripCode")
+    Order getOrderByTripCode(String tripCode);
 }

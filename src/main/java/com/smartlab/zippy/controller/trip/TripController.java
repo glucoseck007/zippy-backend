@@ -22,29 +22,6 @@ public class TripController {
     private final TripService tripService;
     private final TripStatusService tripStatusService;
 
-    @GetMapping("/by-order-id")
-    public ResponseEntity<ApiResponse<TripResponse>> getTripByOrderId(@RequestParam UUID orderId) {
-        try {
-            log.info("Received request to get trip for orderId: {}", orderId);
-
-            TripResponse tripResponse = tripService.getTripByOrderId(orderId);
-
-            return ResponseEntity.ok(
-                    ApiResponse.success(tripResponse, "Trip retrieved successfully")
-            );
-
-        } catch (RuntimeException e) {
-            log.error("Error retrieving trip for orderId {}: {}", orderId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.error(e.getMessage()));
-
-        } catch (Exception e) {
-            log.error("Unexpected error retrieving trip for orderId {}: {}", orderId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ApiResponse.error("Internal server error occurred"));
-        }
-    }
-
     @GetMapping("/by-order-code")
     public ResponseEntity<ApiResponse<TripResponse>> getTripByOrderCode(@RequestParam String orderCode) {
         try {
@@ -68,51 +45,35 @@ public class TripController {
         }
     }
 
-    @GetMapping("/order/code/{orderCode}")
-    public ResponseEntity<ApiResponse<TripResponse>> getTripByOrderCodePath(@PathVariable String orderCode) {
+    @GetMapping("/cancel")
+    public ResponseEntity<ApiResponse<TripResponse>> cancelTrip(@RequestParam String tripCode) {
         try {
-            log.info("Received request to get trip for orderCode: {}", orderCode);
+            log.info("Received request to cancel trip for tripCode: {}", tripCode);
 
-            TripResponse tripResponse = tripService.getTripByOrderCode(orderCode);
+            TripResponse tripResponse = tripStatusService.cancelTrip(tripCode);
 
             return ResponseEntity.ok(
-                    ApiResponse.success(tripResponse, "Trip retrieved successfully")
+                    ApiResponse.success(tripResponse, "Trip cancelled successfully")
             );
 
         } catch (RuntimeException e) {
-            log.error("Error retrieving trip for orderCode {}: {}", orderCode, e.getMessage(), e);
+            log.error("Error cancelling trip for tripCode {}: {}", tripCode, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(ApiResponse.error(e.getMessage()));
 
         } catch (Exception e) {
-            log.error("Unexpected error retrieving trip for orderCode {}: {}", orderCode, e.getMessage(), e);
+            log.error("Unexpected error cancelling trip for tripCode {}: {}", tripCode, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Internal server error occurred"));
         }
     }
 
-    @GetMapping("/progress/{tripCode}")
-    public ResponseEntity<ApiResponse<TripProgressResponse>> getTripProgressByParam(@PathVariable String tripCode) {
+    @GetMapping("/progress")
+    public ResponseEntity<ApiResponse<TripProgressResponse>> getTripProgressByParam(@RequestParam String tripCode) {
         try {
             log.info("Received request to get progress for tripCode: {}", tripCode);
 
-            // Get progress from TripStatusService
-            double progress = tripStatusService.getTripProgress(tripCode);
-
-            // Get trip details to include status
-            TripResponse tripResponse = tripService.getTripByCode(tripCode);
-
-            // Check if the trip is in the "PREPARED" status (robot is heading to start point)
-            boolean isPreparing = "PREPARED".equals(tripResponse.getStatus());
-
-            TripProgressResponse progressResponse = TripProgressResponse.builder()
-                    .tripCode(tripCode)
-                    .overallStatus(tripResponse.getStatus())
-                    .progress(progress)
-                    .isPreparing(isPreparing)
-                    .startTime(tripResponse.getStartTime())
-                    .endTime(tripResponse.getEndTime())
-                    .build();
+            TripProgressResponse progressResponse = tripStatusService.getTripProgressResponse(tripCode);
 
             return ResponseEntity.ok(
                     ApiResponse.success(progressResponse, "Trip progress retrieved successfully")

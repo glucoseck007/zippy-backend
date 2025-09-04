@@ -14,6 +14,9 @@ import java.util.UUID;
 @Repository
 public interface RobotRepository extends CrudRepository<Robot, UUID> {
     Optional<Robot> findByCode(String code);
+
+    @Query ("SELECT r FROM Robot r JOIN Trip t ON r.id = t.robotId WHERE t.tripCode = :tripCode")
+    Optional<Robot> findRobotByTripCode(String tripCode);
     List<Robot> findByRoomCode(String roomCode);
 
     // New double-based battery query methods
