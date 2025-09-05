@@ -267,13 +267,13 @@ public class RobotMessageService {
                     robot.setLocationRealtime(tripCache.getEnd_point());
                     robot.setRoomCode(tripCache.getEnd_point());
                     trip.setStatus("DELIVERED");
+                    publishQRCode(robotCode, tripCache.getTrip_id());
                     log.info("Progress: {}", tripCache.getProgress());
                     break;
                 case 4: // Finish
                     robot.setLocationRealtime(tripCache.getEnd_point());
                     robot.setRoomCode(tripCache.getEnd_point());
                     trip.setStatus("FINISHED");
-                    publishQRCode(robotCode, tripCache.getTrip_id());
                     log.info("Progress: {}", tripCache.getProgress());
                     break;
                 default:
@@ -323,7 +323,7 @@ public class RobotMessageService {
 
         if (lastPublishedTime == null || java.time.Duration.between(lastPublishedTime, now).getSeconds() >= QR_CODE_COOLDOWN_SECONDS) {
             // Publish the QR code command
-            mqttCommandPublisher.publishQrCodeCommand(robotCode, qrCodeBase64, 2);
+            mqttCommandPublisher.publishQrCodeCommand(robotCode, qrCodeBase64, 1);
 
             // Update the last published time
             qrCodePublishingTracker.put(robotCode + "_" + tripCode, now);

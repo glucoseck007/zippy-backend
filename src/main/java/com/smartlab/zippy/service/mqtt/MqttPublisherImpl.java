@@ -2,6 +2,7 @@ package com.smartlab.zippy.service.mqtt;
 
 
 import com.smartlab.zippy.interfaces.MqttCommandPublisher;
+import com.smartlab.zippy.model.dto.robot.ContainerCmdDTO;
 import com.smartlab.zippy.model.dto.trip.TripCommandMqttDTO;
 import com.smartlab.zippy.model.dto.trip.TripRegisterMqttDTO;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,8 @@ public class MqttPublisherImpl implements MqttCommandPublisher {
 
     @Override
     public void publishTripCommand(String robotCode, TripCommandMqttDTO dto) {
+        log.info("Publishing trip command for robot: {} with trip: {} and command status: {}",
+            robotCode, dto.getTrip_id(), dto.getCommand_status());
         MqttCommandPublisher.super.publishTripCommand(robotCode, dto);
     }
 
@@ -87,5 +90,10 @@ public class MqttPublisherImpl implements MqttCommandPublisher {
     @Override
     public void publishWarning(String robotCode, String title, String message, String timestamp) {
         MqttCommandPublisher.super.publishWarning(robotCode, title, message, timestamp);
+    }
+
+    @Override
+    public void publishContainerCmd(String topic, ContainerCmdDTO dto) {
+        MqttCommandPublisher.super.publishContainerCmd(topic, dto);
     }
 }

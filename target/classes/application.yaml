@@ -76,6 +76,7 @@ mqtt:
       - robot/+/trip
       - robot/+/trip/register
       - robot/+/trip/cancel
+      - robot/+/container/cmd
       - robot/+/trip/command
       - robot/+/qr-code
       - robot/+/force_move

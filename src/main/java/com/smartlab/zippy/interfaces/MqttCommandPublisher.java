@@ -1,5 +1,6 @@
 package com.smartlab.zippy.interfaces;
 
+import com.smartlab.zippy.model.dto.robot.ContainerCmdDTO;
 import com.smartlab.zippy.model.dto.trip.TripCommandMqttDTO;
 import com.smartlab.zippy.model.dto.trip.TripRegisterMqttDTO;
 import org.springframework.integration.annotation.MessagingGateway;
@@ -35,9 +36,9 @@ public interface MqttCommandPublisher {
     }
 
     default void publishTripCommand(String robotCode, TripCommandMqttDTO dto) {
-        String topic = String.format("robot/%s/trip", robotCode);
+        String topic = String.format("robot/%s/trip/command", robotCode);
         String payload = String.format(
-            "{\"trip_id\":\"%s\",\"command_status\":\"%s\"}",
+            "{\"trip_id\":\"%s\",\"command_status\":%d}",
             dto.getTrip_id(), dto.getCommand_status()
         );
         publish(payload, topic);
@@ -76,6 +77,12 @@ public interface MqttCommandPublisher {
             "{\"title\":\"%s\",\"message\":\"%s\",\"timestamp\":\"%s\"}",
             title, message, timestamp
         );
+        publish(payload, topic);
+    }
+
+    default void publishContainerCmd(String robotCode, ContainerCmdDTO dto) {
+        String topic = String.format("robot/%s/container/cmd", robotCode);
+        String payload = String.format("{\"lock\":%d}",dto.getLock());
         publish(payload, topic);
     }
 }

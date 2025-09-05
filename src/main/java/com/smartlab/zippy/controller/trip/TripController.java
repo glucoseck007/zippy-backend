@@ -68,6 +68,29 @@ public class TripController {
         }
     }
 
+    @GetMapping("/continue")
+    public ResponseEntity<ApiResponse<TripResponse>> continueTrip(@RequestParam String tripCode) {
+        try {
+            log.info("Received request to continue trip for tripCode: {}", tripCode);
+
+            TripResponse tripResponse = tripStatusService.continueTrip(tripCode);
+
+            return ResponseEntity.ok(
+                    ApiResponse.success(tripResponse, "Trip continued successfully")
+            );
+
+        } catch (RuntimeException e) {
+            log.error("Error continuing trip for tripCode {}: {}", tripCode, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+
+        } catch (Exception e) {
+            log.error("Unexpected error continuing trip for tripCode {}: {}", tripCode, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Internal server error occurred"));
+        }
+    }
+
     @GetMapping("/progress")
     public ResponseEntity<ApiResponse<TripProgressResponse>> getTripProgressByParam(@RequestParam String tripCode) {
         try {
